@@ -1,0 +1,95 @@
+# Ambiente de desenvolvimento.
+# Producao usa docker-compose.prod.yml (Fase 10), com redes separadas,
+# imagens fixadas por digest e nenhuma porta publicada alem do Caddy.
+name: vlos-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: vlos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-dev-app}
+      MIGRATOR_DB_PASSWORD: ${MIGRATOR_DB_PASSWORD:-dev-migrator}
+    ports:
+      - "127.0.0.1:5432:5432"   # so localhost, nem em dev fica aberto na rede
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vlos"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-dev-redis}", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-dev-redis}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-vlos-minio}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-dev-minio-secret}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+      target: dev
+    command: ["npm", "run", "dev", "--workspace", "@vlos/api"]
+    env_file: [../../.env]
+    environment:
+      DATABASE_URL: postgres://vlos_app:${APP_DB_PASSWORD:-dev-app}@postgres:5432/vlos
+      REDIS_URL: redis://:${REDIS_PASSWORD:-dev-redis}@redis:6379
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ../..:/app
+      - /app/node_modules
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+      target: dev
+    command: ["npm", "run", "dev", "--workspace", "@vlos/worker"]
+    env_file: [../../.env]
+    environment:
+      DATABASE_URL: postgres://vlos_app:${APP_DB_PASSWORD:-dev-app}@postgres:5432/vlos
+      REDIS_URL: redis://:${REDIS_PASSWORD:-dev-redis}@redis:6379
+    volumes:
+      - ../..:/app
+      - /app/node_modules
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

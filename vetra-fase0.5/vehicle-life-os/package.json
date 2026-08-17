@@ -1,0 +1,37 @@
+{
+  "name": "vehicle-life-os",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "docker compose --env-file .env -f infra/docker/docker-compose.dev.yml up",
+    "dev:infra": "docker compose --env-file .env -f infra/docker/docker-compose.dev.yml up postgres redis minio",
+    "db:migrate": "node tools/migrate.mjs up",
+    "db:status": "node tools/migrate.mjs status",
+    "db:seed": "node tools/migrate.mjs seed",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev:down": "docker compose --env-file .env -f infra/docker/docker-compose.dev.yml down",
+    "test:db": "vitest run tests/"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "pg": "^8.13.1",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^2.1.8"
+  }
+}
