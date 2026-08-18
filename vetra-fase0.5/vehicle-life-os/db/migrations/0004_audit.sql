@@ -1,3 +1,7 @@
+DO $$ BEGIN
+  CREATE ROLE vlos_app;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 -- =============================================================================
 -- 0004_audit
 -- Log auditavel com encadeamento por hash (briefing secoes 34 e 51).
