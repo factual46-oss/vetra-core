@@ -1,5 +1,5 @@
 import {
-  ArgumentsHost,
+  type ArgumentsHost,
   Catch,
   type ExceptionFilter,
   HttpException,
@@ -7,7 +7,13 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { problemFor } from './problem-details.js';
+import { problemFor, type ProblemOptions } from './problem-details.js';
+
+/** Forma do corpo de erro que o Nest produz. Evita `any` na leitura. */
+interface NestErrorBody {
+  message?: string | string[];
+  errors?: Record<string, string[]>;
+}
 
 @Catch()
 export class ProblemDetailsFilter implements ExceptionFilter {
@@ -17,21 +23,21 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const request = ctx.getRequest<FastifyRequest>();
     const reply = ctx.getResponse<FastifyReply>();
-    const traceId = String(request.id ?? '');
+    const traceId = String(request.id);
 
     const status =
       exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    let detail: string | undefined;
-    let errors: Record<string, string[]> | undefined;
+    const options: ProblemOptions = { instance: request.url, traceId };
 
     if (exception instanceof HttpException) {
-      const response = exception.getResponse();
-      if (typeof response === 'string') detail = response;
-      else if (response && typeof response === 'object') {
-        const body = response as { message?: unknown; errors?: Record<string, string[]> };
-        detail = Array.isArray(body.message) ? body.message.join('; ') : (body.message as string);
-        errors = body.errors;
+      const response: string | object = exception.getResponse();
+      if (typeof response === 'string') {
+        options.detail = response;
+      } else {
+        const body = response as NestErrorBody;
+        options.detail = Array.isArray(body.message) ? body.message.join('; ') : body.message;
+        options.errors = body.errors;
       }
     }
 
@@ -43,6 +49,6 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     void reply
       .status(status)
       .header('content-type', 'application/problem+json; charset=utf-8')
-      .send(problemFor(status, { detail, instance: request.url, traceId, ...(errors ? { errors } : {}) }));
+      .send(problemFor(status, options));
   }
 }
