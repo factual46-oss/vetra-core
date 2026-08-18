@@ -3,14 +3,14 @@ import type { IncomingMessage } from 'node:http';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
-import helmet from '@fastify/helmet';
+import { helmet } from '@fastify/helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { ProblemDetailsFilter } from './common/problem-details.filter.js';
 import { resolveRequestId, type RequestWithId } from './common/request-id.js';
 import { getEnv, trustProxySetting } from './config/env.js';
 
-/**
+/*
  * AUD-15: limite global pequeno e deliberado (gate item 20).
  * Upload de documento NAO aumenta este numero: a rota de upload sera registrada
  * na Fase 4 com @fastify/multipart, limite proprio, streaming direto para o
@@ -25,7 +25,7 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
-      /**
+      /*
        * AUD-07 (ALTO, corrigido): antes era `trustProxy: true` incondicional.
        * Se a API for alcancavel diretamente, qualquer cliente forja
        * X-Forwarded-For e passa a controlar o IP visto pelo rate limiting e
