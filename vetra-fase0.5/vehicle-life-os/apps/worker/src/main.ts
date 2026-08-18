@@ -1,4 +1,5 @@
 import { Worker } from 'bullmq';
+import type { Job } from 'bullmq';
 import IORedis from 'ioredis';
 import pino from 'pino';
 import { QUEUES, type QueueName } from './queues.js';
@@ -23,7 +24,7 @@ const workers: Worker[] = [];
 function register(name: QueueName, handler: (data: unknown) => Promise<void>, concurrency = 2): void {
   const worker = new Worker(
     name,
-    async (job) => {
+    async (job: Job<unknown>) => {
       const started = Date.now();
       logger.info({ queue: name, jobId: job.id, attempt: job.attemptsMade + 1 }, 'job iniciado');
       await handler(job.data);
@@ -32,7 +33,7 @@ function register(name: QueueName, handler: (data: unknown) => Promise<void>, co
     { connection, concurrency },
   );
 
-  worker.on('failed', (job, err) => {
+  worker.on('failed', (job: Job<unknown> | undefined, err: Error) => {
     logger.error({ queue: name, jobId: job?.id, attempt: job?.attemptsMade, err }, 'job falhou');
   });
 
