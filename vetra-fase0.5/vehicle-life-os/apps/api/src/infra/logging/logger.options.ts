@@ -1,5 +1,8 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Params } from 'nestjs-pino';
+import type { Options } from 'pino-http';
 import { getEnv } from '../../config/env.js';
+import { resolveRequestId, type RequestWithId } from '../../common/request-id.js';
 
 /**
  * Briefing secao 87 / Doc 03 secao 9:
@@ -43,24 +46,36 @@ export const REDACTED_PATHS = [
  */
 export function buildLoggerOptions(): Params {
   const env = getEnv();
-  return {
-    pinoHttp: {
-      level: env.LOG_LEVEL,
-      genReqId: (req, res) => {
-        const id = String(req.id);
-        res.setHeader('x-request-id', id);
-        return id;
-      },
-      redact: { paths: REDACTED_PATHS, censor: '[REDACTED]' },
-      serializers: {
-        req: (req) => ({ id: req.id, method: req.method, url: req.url }),
-        res: (res) => ({ statusCode: res.statusCode }),
-      },
-      autoLogging: { ignore: (req) => req.url?.startsWith('/health') ?? false },
-      transport:
-        env.NODE_ENV === 'development'
-          ? { target: 'pino-pretty', options: { singleLine: true } }
-          : undefined,
+
+  /**
+   * CI-03: o objeto e anotado como `Options` do pino-http em vez de ficar
+   * inline. `Params.pinoHttp` e uma uniao (opcoes | stream | tupla), e uniao
+   * nao propaga tipagem contextual: era dai que vinham os "implicitly has an
+   * 'any' type" nos parametros req/res e o erro de atribuicao do logger.
+   */
+  const options: Options = {
+    level: env.LOG_LEVEL,
+    genReqId: (req: IncomingMessage, res: ServerResponse): string => {
+      const id = resolveRequestId(req as RequestWithId);
+      res.setHeader('x-request-id', id);
+      return id;
+    },
+    redact: { paths: REDACTED_PATHS, censor: '[REDACTED]' },
+    // Corpo de requisicao nunca e logado por padrao.
+    serializers: {
+      req: (req: RequestWithId) => ({ id: req.id, method: req.method, url: req.url }),
+      res: (res: ServerResponse) => ({ statusCode: res.statusCode }),
+    },
+    autoLogging: {
+      ignore: (req: IncomingMessage): boolean => req.url?.startsWith('/health') ?? false,
     },
   };
+
+  // Atribuicao condicional em vez de `transport: cond ? {...} : undefined`:
+  // passar `undefined` explicito para propriedade opcional era outro TS2375.
+  if (env.NODE_ENV === 'development') {
+    options.transport = { target: 'pino-pretty', options: { singleLine: true } };
+  }
+
+  return { pinoHttp: options };
 }
