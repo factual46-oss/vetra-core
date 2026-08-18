@@ -37,7 +37,7 @@ async function bootstrap(): Promise<void> {
       // valor na requisicao crua, entao pino e filtro de erros veem o mesmo id.
       // CI-05: parametro anotado -- o construtor do FastifyAdapter nao propaga
       // tipagem contextual, e sem a anotacao o `req` caia em implicit any.
-      genReqId: (req: IncomingMessage): string => resolveRequestId(req as RequestWithId),
+      genReqId: genReqId: (req: IncomingMessage | Http2ServerRequest): string => resolveRequestId(req),
     }),
     { bufferLogs: true },
   );
