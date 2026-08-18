@@ -56,9 +56,9 @@ export function buildLoggerOptions(): Params {
   const options: Options = {
     level: env.LOG_LEVEL,
     genReqId: (req: IncomingMessage, res: ServerResponse): string => {
-      const id = resolveRequestId(req as RequestWithId);
-      res.setHeader('x-request-id', id);
-      return id;
+  const id = resolveRequestId(req);
+  res.setHeader('x-request-id', id);
+  return id;
     },
     redact: { paths: REDACTED_PATHS, censor: '[REDACTED]' },
     // Corpo de requisicao nunca e logado por padrao.
