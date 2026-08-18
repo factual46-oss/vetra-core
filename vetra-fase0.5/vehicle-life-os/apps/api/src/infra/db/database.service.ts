@@ -1,8 +1,15 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
-import pg from 'pg';
+import { Pool } from 'pg';
+import type { PoolClient, PoolConfig, QueryResult, QueryResultRow } from 'pg';
 import { getEnv } from '../../config/env.js';
 
-export type Executor = Pick<pg.PoolClient, 'query'>;
+/**
+ * CI-04: import nomeado, nao `import pg from 'pg'`.
+ * @types/pg declara exports nomeados e nao tem export default. Com NodeNext, o
+ * default sintetico nao carrega as assinaturas de construcao -- era a origem do
+ * "This expression is not constructable" em `new pg.Pool()`.
+ */
+export type Executor = Pick<PoolClient, 'query'>;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -19,19 +26,20 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 @Injectable()
 export class DatabaseService implements OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
-  private readonly pool: pg.Pool;
+  private readonly pool: Pool;
 
   constructor() {
     const env = getEnv();
-    this.pool = new pg.Pool({
+    const config: PoolConfig = {
       connectionString: env.DATABASE_URL,
       max: env.DATABASE_POOL_MAX,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
       statement_timeout: 15_000, // AUD-13: consulta travada nao segura conexao do pool
       application_name: 'vlos-api',
-    });
-    this.pool.on('error', (err) => this.logger.error({ err }, 'erro no pool do postgres'));
+    };
+    this.pool = new Pool(config);
+    this.pool.on('error', (err: Error) => this.logger.error({ err }, 'erro no pool do postgres'));
   }
 
   /**
@@ -70,10 +78,10 @@ export class DatabaseService implements OnModuleDestroy {
    * Uso legitimo: health check, catalogo publico, tarefas de sistema.
    * Nunca use para ler dado pertencente a um usuario.
    */
-  async queryUnscoped<T extends pg.QueryResultRow = pg.QueryResultRow>(
+  async queryUnscoped<T extends QueryResultRow = QueryResultRow>(
     text: string,
     values: unknown[] = [],
-  ): Promise<pg.QueryResult<T>> {
+  ): Promise<QueryResult<T>> {
     return this.pool.query<T>(text, values);
   }
 
