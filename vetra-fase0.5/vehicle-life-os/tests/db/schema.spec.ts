@@ -3,7 +3,7 @@ import type pg from 'pg';
 import { HAS_DB, MIGRATOR_URL, connect, expectRejection } from '../helpers/db.js';
 
 /** Gate itens 41 e 42: integridade referencial, constraints, transacoes, migrations. */
-describe (!HAS_DB)('integridade do schema', () => {
+describe ('integridade do schema', () => {
   let db: pg.Client;
 
   beforeAll(async () => {
