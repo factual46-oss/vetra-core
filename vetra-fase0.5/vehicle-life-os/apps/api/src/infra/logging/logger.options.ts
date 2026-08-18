@@ -76,6 +76,5 @@ export function buildLoggerOptions(): Params {
   if (env.NODE_ENV === 'development') {
     options.transport = { target: 'pino-pretty', options: { singleLine: true } };
   }
-
   return { pinoHttp: options };
 }
