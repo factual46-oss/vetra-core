@@ -49,10 +49,10 @@ jobs:
         run: npm run db:migrate
         env:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
-        
 
       - name: 🛡️ Testes de Segurança, RLS e Auditoria
-        run: npm test
         env:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
+          DB_PASSWORD: vetra_password
+        run: npm test
         
