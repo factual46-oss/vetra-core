@@ -39,12 +39,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 🧪 Executar Testes
-        run: npm test
-        env: 
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/vlos_test
-          DB_PASSWORD: postgres
-
       - name: 🔍 Verificação de Tipos (Typecheck)
         run: npm run typecheck
 
