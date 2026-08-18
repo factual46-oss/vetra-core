@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import type { IncomingMessage } from 'node:http'import type { Http2ServerRequest } from 'node:http2'; 
+import type { IncomingMessage } from 'node:http';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -24,7 +24,7 @@ async function bootstrap(): Promise<void> {
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ ... }).
+    new FastifyAdapter({
       /**
        * AUD-07 (ALTO, corrigido): antes era `trustProxy: true` incondicional.
        * Se a API for alcancavel diretamente, qualquer cliente forja
@@ -37,7 +37,7 @@ async function bootstrap(): Promise<void> {
       // valor na requisicao crua, entao pino e filtro de erros veem o mesmo id.
       // CI-05: parametro anotado -- o construtor do FastifyAdapter nao propaga
       // tipagem contextual, e sem a anotacao o `req` caia em implicit any.
-      genReqId: (req: IncomingMessage | Http2ServerRequest): string => resolveRequestId(req),
+      genReqId: (req: IncomingMessage): string => resolveRequestId(req as RequestWithId),
     }),
     { bufferLogs: true },
   );
