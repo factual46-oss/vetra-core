@@ -38,7 +38,7 @@ async function bootstrap(): Promise<void> {
       // valor na requisicao crua, entao pino e filtro de erros veem o mesmo id.
       // CI-05: parametro anotado -- o construtor do FastifyAdapter nao propaga
       // tipagem contextual, e sem a anotacao o `req` caia em implicit any.
-      genReqId: (req: IncomingMessage | Http2ServerRequest): string => resolveRequestId(req),
+      genReqId: (req: IncomingMessage | Http2ServerRequest): string => resolveRequestId(req as any),
     }),
     { bufferLogs: true },
   );
@@ -46,7 +46,7 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(Logger));
 
   // Cabecalhos de seguranca (Doc 03, secao 7)
-  await app.register(helmet, {
+  await app.register(helmet as any, {
     contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
     hsts: { maxAge: 63_072_000, includeSubDomains: true, preload: true },
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
