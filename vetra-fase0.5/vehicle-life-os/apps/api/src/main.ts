@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { randomUUID } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -7,6 +7,7 @@ import helmet from '@fastify/helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { ProblemDetailsFilter } from './common/problem-details.filter.js';
+import { resolveRequestId, type RequestWithId } from './common/request-id.js';
 import { getEnv, trustProxySetting } from './config/env.js';
 
 /**
@@ -32,12 +33,11 @@ async function bootstrap(): Promise<void> {
        */
       trustProxy: trustProxySetting(env),
       bodyLimit: GLOBAL_BODY_LIMIT_BYTES,
-      // AUD-10: fonte unica do id de requisicao, honrando o header quando vem
-      // de um proxy confiavel. O pino e o filtro de erros reusam este id.
-      genReqId: (req) => {
-        const header = req.headers['x-request-id'];
-        return typeof header === 'string' && /^[\w-]{1,64}$/.test(header) ? header : randomUUID();
-      },
+      // AUD-10: fonte unica do id de requisicao. resolveRequestId memoiza o
+      // valor na requisicao crua, entao pino e filtro de erros veem o mesmo id.
+      // CI-05: parametro anotado -- o construtor do FastifyAdapter nao propaga
+      // tipagem contextual, e sem a anotacao o `req` caia em implicit any.
+      genReqId: (req: IncomingMessage): string => resolveRequestId(req as RequestWithId),
     }),
     { bufferLogs: true },
   );
