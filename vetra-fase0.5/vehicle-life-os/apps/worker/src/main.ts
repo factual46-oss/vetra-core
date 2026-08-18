@@ -3,7 +3,6 @@ import type { Job } from 'bullmq';
 import { IORedis } from 'ioredis';
 import { pino } from 'pino';
 import { QUEUES, type QueueName } from './queues.js';
-} 
 
 /*
  * Processo de workers (Fase 0: esqueleto com uma fila real).
