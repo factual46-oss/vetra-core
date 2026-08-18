@@ -18,7 +18,7 @@ if (!redisUrl) {
   process.exit(1);
 }
 
-const connection = Redis(redisUrl, { maxRetriesPerRequest: null });
+const connection = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const workers: Worker[] = [];
 
 function register(name: QueueName, handler: (data: unknown) => Promise<void>, concurrency = 2): void {
