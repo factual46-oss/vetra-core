@@ -32,10 +32,20 @@ const TITLES: Record<number, string> = {
   503: 'Serviço indisponível',
 };
 
-export function problemFor(
-  status: number,
-  options: { detail?: string; instance?: string; traceId?: string; errors?: Record<string, string[]> } = {},
-): ProblemDetails {
+/**
+ * CI-02: cada opcional declara `| undefined`. E o que o TS2375 do pipeline
+ * cobrava: quem chama monta o objeto a partir de valores que podem ser
+ * indefinidos, e obrigar cada chamador a montar o literal condicionalmente
+ * empurraria ruido para todos eles.
+ */
+export interface ProblemOptions {
+  detail?: string | undefined;
+  instance?: string | undefined;
+  traceId?: string | undefined;
+  errors?: Record<string, string[]> | undefined;
+}
+
+export function problemFor(status: number, options: ProblemOptions = {}): ProblemDetails {
   const problem: ProblemDetails = {
     type: `https://docs.vehiclelifeos.com/errors/${status}`,
     title: TITLES[status] ?? 'Erro',
