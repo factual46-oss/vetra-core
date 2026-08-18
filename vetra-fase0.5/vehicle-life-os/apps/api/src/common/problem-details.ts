@@ -1,4 +1,4 @@
-**
+/**
  * RFC 7807.
  *
  * AUD-18: este modulo nao importa nada do framework. A forma do erro e regra do
