@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type pg from 'pg';
 import { HAS_DB, MIGRATOR_URL, connect, expectRejection } from '../helpers/db.js';
 
-/** Gate itens 41 e 42: integridade referencial, constraints, transacoes, migrations. */
+/* Gate itens 41 e 42: integridade referencial, constraints, transacoes, migrations. */
 describe ('integridade do schema', () => {
   let db: pg.Client;
 
