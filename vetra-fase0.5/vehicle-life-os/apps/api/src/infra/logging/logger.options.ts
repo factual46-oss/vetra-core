@@ -56,7 +56,7 @@ export function buildLoggerOptions(): Params {
   const options: Options = {
     level: env.LOG_LEVEL,
     genReqId: (req: IncomingMessage, res: ServerResponse): string => {
-  const id = resolveRequestId(req);
+  const id = resolveRequestId(req as any);
   res.setHeader('x-request-id', id);
   return id;
     },
