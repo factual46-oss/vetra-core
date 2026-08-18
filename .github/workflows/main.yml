@@ -39,6 +39,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: 📦 Instalar dependências (npm install)
+        run: npm install
+
       - name: 🔍 Verificação de Tipos (Typecheck)
         run: npm run typecheck
 
