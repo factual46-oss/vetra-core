@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq';
 import type { Job } from 'bullmq';
-import { IORedis } from 'ioredis';
+import Redis from 'ioredis';
 import { pino } from 'pino';
 import { QUEUES, type QueueName } from './queues.js';
 
