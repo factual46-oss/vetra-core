@@ -10,8 +10,8 @@ import pg from 'pg';
  * "skipped" -- nunca "passed". Teste de seguranca que passa sem rodar e pior
  * que teste nenhum, porque cria confianca falsa.
  */
-export const APP_URL = process.env.TEST_DATABASE_URL_APP;
-export const MIGRATOR_URL = process.env.TEST_DATABASE_URL_MIGRATOR;
+export const APP_URL = process.env.TEST_DATABASE_URL_APP || process.env.DATABASE_URL;
+export const MIGRATOR_URL = process.env.TEST_DATABASE_URL_MIGRATOR || process.env.DATABASE_URL;
 export const HAS_DB = Boolean(APP_URL && MIGRATOR_URL);
 
 export function connect(url: string): pg.Client {
