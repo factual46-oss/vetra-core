@@ -1,17 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import type { IncomingMessage } from 'node:http';
 
 /**
- * O Fastify guarda o id na sua propria Request; o pino-http recebe a
- * IncomingMessage crua, que nao tem esse campo. Sem um ponto comum, os dois
- * geram ids diferentes -- foi exatamente o defeito AUD-10.
+ * Contrato estrutural mínimo, em vez de amarrar a um tipo concreto do Node.
  *
- * Aqui o id e derivado UMA vez e memoizado na requisicao crua, entao Fastify,
- * pino e o filtro de erros enxergam o mesmo valor.
+ * CI-07: o Fastify tipa genReqId como `(req: IncomingMessage | Http2ServerRequest)`.
+ * Uma função que aceita só IncomingMessage não é atribuível a essa assinatura
+ * (contravariância de parâmetro). Descrevendo apenas o que a função realmente
+ * usa — headers e id — tanto IncomingMessage quanto Http2ServerRequest passam
+ * a satisfazer o contrato sem cast, e a mesma função serve ao Fastify e ao pino.
  */
-export type RequestWithId = IncomingMessage & { id?: string };
+export interface RequestWithId {
+  id?: string;
+  headers: { [key: string]: string | string[] | undefined };
+}
 
-/** Aceita apenas ids simples: header de proxy nao vira vetor de log injection. */
+/** Aceita apenas ids simples: header de proxy não vira vetor de log injection. */
 const SAFE_ID = /^[\w-]{1,64}$/;
 
 export function resolveRequestId(req: RequestWithId): string {
