@@ -12,7 +12,7 @@ import { APP_URL, HAS_DB, MIGRATOR_URL, connect, expectRejection } from '../help
  * E os privilegios provam uma terceira: a aplicacao escreve no log, mas nao o le
  * nem o altera.
  */
-describe.skipIf(!HAS_DB)('cadeia de hash do log auditavel', () => {
+describe (!HAS_DB)('cadeia de hash do log auditavel', () => {
   let db: pg.Client;
   let firstId: number;
 
