@@ -62,10 +62,10 @@ export function buildLoggerOptions(): Params {
     },
     redact: { paths: REDACTED_PATHS, censor: '[REDACTED]' },
     // Corpo de requisicao nunca e logado por padrao.
-    serializers: {
-      req: (req: RequestWithId) => ({ id: req.id, method: req.method, url: req.url }),
-      res: (res: ServerResponse) => ({ statusCode: res.statusCode }),
-    },
+    serializers: serializers: {
+  req: (req: IncomingMessage & RequestWithId) => ({ id: req.id, method: req.method, url: req.url }),
+  res: (res: ServerResponse) => ({ statusCode: res.statusCode }),
+},
     autoLogging: {
       ignore: (req: IncomingMessage): boolean => req.url?.startsWith('/health') ?? false,
     },
