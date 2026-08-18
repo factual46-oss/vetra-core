@@ -4,7 +4,7 @@ import type { Options } from 'pino-http';
 import { getEnv } from '../../config/env.js';
 import { resolveRequestId, type RequestWithId } from '../../common/request-id.js';
 
-/**
+/*
  * Briefing secao 87 / Doc 03 secao 9:
  * a redacao e configuracao do logger, nao convencao de quem escreve o log.
  * Nao ha caminho em que um destes campos chegue ao disco em claro.
@@ -37,7 +37,7 @@ export const REDACTED_PATHS = [
   '*.connectionString',
 ];
 
-/**
+/*
  * AUD-06: construida sob demanda, nao no import.
  * AUD-10: o id da requisicao vem do Fastify (fonte unica). Antes havia dois
  * geradores concorrentes -- o do adapter e o do pino-http -- e o traceId que
@@ -47,7 +47,7 @@ export const REDACTED_PATHS = [
 export function buildLoggerOptions(): Params {
   const env = getEnv();
 
-  /**
+  /*
    * CI-03: o objeto e anotado como `Options` do pino-http em vez de ficar
    * inline. `Params.pinoHttp` e uma uniao (opcoes | stream | tupla), e uniao
    * nao propaga tipagem contextual: era dai que vinham os "implicitly has an
