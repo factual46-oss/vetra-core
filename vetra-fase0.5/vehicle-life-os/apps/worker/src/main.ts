@@ -1,8 +1,9 @@
 import { Worker } from 'bullmq';
 import type { Job } from 'bullmq';
-import IORedis from 'ioredis';
-import pino from 'pino';
+import { IORedis } from 'ioredis';
+import { pino } from 'pino';
 import { QUEUES, type QueueName } from './queues.js';
+} 
 
 /*
  * Processo de workers (Fase 0: esqueleto com uma fila real).
@@ -58,4 +59,4 @@ async function shutdown(signal: string): Promise<void> {
 
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
-}
+} 
