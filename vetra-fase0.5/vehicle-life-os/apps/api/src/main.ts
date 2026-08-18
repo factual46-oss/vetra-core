@@ -3,7 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
-import helmet from '@fastify/helmet';
+import { helmet } from '@fastify/helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { ProblemDetailsFilter } from './common/problem-details.filter.js';
@@ -37,7 +37,7 @@ async function bootstrap(): Promise<void> {
       // valor na requisicao crua, entao pino e filtro de erros veem o mesmo id.
       // CI-05: parametro anotado -- o construtor do FastifyAdapter nao propaga
       // tipagem contextual, e sem a anotacao o `req` caia em implicit any.
-      genReqId: genReqId: (req: IncomingMessage | Http2ServerRequest): string => resolveRequestId(req),
+      genReqId: (req: IncomingMessage | Http2ServerRequest): string => resolveRequestId(req),
     }),
     { bufferLogs: true },
   );
