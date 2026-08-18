@@ -1,6 +1,6 @@
 import pg from 'pg';
 
-/**
+/*
  * Conexoes usadas pelos testes de banco.
  *
  * TEST_DATABASE_URL_APP      -> role vlos_app      (a que a API usa)
