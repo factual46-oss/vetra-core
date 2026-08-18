@@ -39,18 +39,23 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 📦 Instalar dependências (npm install)
-        run: npm install
+      - name: 🧪 Executar Testes
+        run: npm test
+        env: 
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/vlos_test
+          DB_PASSWORD: postgres
 
       - name: 🔍 Verificação de Tipos (Typecheck)
         run: npm run typecheck
 
       - name: 🏗️ Executar Migrations (Construir banco)
+        run: npm run db:migrate
         env:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
-        run: npm run db:migrate
+        
 
       - name: 🛡️ Testes de Segurança, RLS e Auditoria
+        run: npm test
         env:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
-        run: npm test
+        
