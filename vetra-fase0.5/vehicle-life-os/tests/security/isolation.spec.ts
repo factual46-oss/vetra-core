@@ -17,7 +17,7 @@ import { APP_URL, HAS_DB, MIGRATOR_URL, asUser, connect, expectRejection } from 
  * arquivo ganha os mesmos casos para veiculo, evento e documento -- a estrutura
  * ja esta pronta para isso.
  */
-describe.(!HAS_DB)('isolamento entre usuarios (RLS)', () => {
+describe (!HAS_DB)('isolamento entre usuarios (RLS)', () => {
   let app: pg.Client;
   let migrator: pg.Client;
   let userA: string;
