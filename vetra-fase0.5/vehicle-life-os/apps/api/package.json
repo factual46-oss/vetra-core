@@ -1,38 +1,30 @@
 {
-  "name": "vehicle-life-os",
-  "private": true,
+  "name": "@vlos/api",
   "version": "0.1.0",
-  "type": "module",
-  "engines": {
-    "node": ">=22.0.0"
-  },
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
+  "private": true,
+  "main": "dist/main.js",
   "scripts": {
-    "dev": "docker compose --env-file .env -f infra/docker/docker-compose.dev.yml up",
-    "dev:infra": "docker compose --env-file .env -f infra/docker/docker-compose.dev.yml up postgres redis minio",
-    "db:migrate": "node tools/migrate.mjs up",
-    "db:status": "node tools/migrate.mjs status",
-    "db:seed": "node tools/migrate.mjs seed",
-    "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "eslint .",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "dev:down": "docker compose --env-file .env -f infra/docker/docker-compose.dev.yml down",
-    "test:db": "vitest run tests/"
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@fastify/helmet": "^12.0.1",
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-fastify": "^10.4.15",
+    "fastify": "^4.28.1",
+    "ioredis": "^5.4.1",
+    "nestjs-pino": "^4.2.0",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "pino-http": "^10.3.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "@types/pg": "^8.11.10",
-    "eslint": "^9.17.0",
-    "pg": "^8.13.1",
-    "prettier": "^3.4.2",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "typescript-eslint": "^8.18.0",
-    "vitest": "^2.1.8"
+    "@types/pg": "^8.11.10"
   }
 }
