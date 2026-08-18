@@ -4,7 +4,7 @@ import IORedis from 'ioredis';
 import pino from 'pino';
 import { QUEUES, type QueueName } from './queues.js';
 
-/**
+/*
  * Processo de workers (Fase 0: esqueleto com uma fila real).
  * Os processadores de OCR, IA e alertas entram nas Fases 5, 6 e 7 -- cada um
  * como arquivo proprio registrado aqui. Nada de processamento pesado no ciclo
@@ -58,3 +58,4 @@ async function shutdown(signal: string): Promise<void> {
 
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
+}
