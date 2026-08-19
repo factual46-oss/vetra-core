@@ -59,5 +59,5 @@ jobs:
         env:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
           DB_PASSWORD: vetra_password
-        run: npm test
+        run: npx vitest run --run --pool=forks --poolOptions.forks.singleFork=true
         
