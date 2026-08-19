@@ -68,7 +68,7 @@ COMMENT ON TABLE ops.rls_exemption IS
 
 INSERT INTO ops.rls_exemption (schema_name, table_name, reason, decided_by) VALUES
   ('vehicle', 'event_type',    'Catalogo de tipos de evento: dado de referencia, identico para todos os usuarios.', 'fase-0'),
-  ('ops',     'rls_exemption', 'Tabela de governanca, sem dado de usuario. Escrita apenas por migration.',          'fase-0');
+  ('ops',     'rls_exemption', 'Tabela de governanca, sem dado de usuario. Escrita apenas por migration.',          'fase-0'),
   ('public',  'tentativa_ddl', 'Tabela de teste temporaria para validacao de DDL.',                                      'fase-0');
 -- Retorna zero linhas quando o modelo esta integro. O CI falha se retornar algo.
 CREATE OR REPLACE FUNCTION ops.tables_missing_rls()
