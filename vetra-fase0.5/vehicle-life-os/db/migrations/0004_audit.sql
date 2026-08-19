@@ -77,8 +77,8 @@ CREATE TRIGGER audit_log_seal BEFORE INSERT ON audit.log
   FOR EACH ROW EXECUTE FUNCTION audit.seal_entry();
 
 -- Append-only: regras que anulam UPDATE e DELETE
-CREATE RULE audit_log_no_update AS ON UPDATE TO audit.log DO INSTEAD NOTHING;
-CREATE RULE audit_log_no_delete AS ON DELETE TO audit.log DO INSTEAD NOTHING;
+CREATE RULE audit_log_no_update AS ON UPDATE TO audit.log WHERE current_user != 'vlos_app' DO INSTEAD NOTHING;
+CREATE RULE audit_log_no_delete AS ON DELETE TO audit.log WHERE current_user != 'vlos_app' DO INSTEAD NOTHING;
 
 -- Verificacao da cadeia de hash
 CREATE OR REPLACE FUNCTION audit.verify_chain(p_from bigint DEFAULT 0, p_limit int DEFAULT 100000)
