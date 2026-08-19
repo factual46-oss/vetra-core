@@ -1,6 +1,7 @@
 DO $$ BEGIN
-  CREATE ROLE vlos_app;
-EXCEPTION WHEN duplicate_object THEN NULL;
+  CREATE ROLE vlos_app WITH LOGIN PASSWORD 'vetra_password';
+EXCEPTION WHEN duplicate_object THEN
+  ALTER ROLE vlos_app WITH LOGIN PASSWORD 'vetra_password';
 END $$;
 -- =============================================================================
 -- 0004_audit
@@ -115,8 +116,7 @@ BEGIN
     );
 
     IF r.prev_hash IS DISTINCT FROM v_prev OR r.entry_hash IS DISTINCT FROM v_expected THEN
-      broken_at := r.id; expected := v_expected; found := r.entry_hash;
-      RETURN NEXT;
+      RETURN QUERY SELECT r.id, v_expected, r.entry_hash;
       RETURN;
     END IF;
 
