@@ -90,9 +90,14 @@ $fn$ LANGUAGE plpgsql SET search_path = pg_catalog, public, extensions;
 CREATE TRIGGER audit_log_seal BEFORE INSERT ON audit.log
   FOR EACH ROW EXECUTE FUNCTION audit.seal_entry();
 
--- Append-only, inclusive para a aplicacao.
-CREATE RULE audit_log_no_update AS ON UPDATE TO audit.log DO INSTEAD NOTHING;
-CREATE RULE audit_log_no_delete AS ON DELETE TO audit.log DO INSTEAD NOTHING;
+-- Append-only estrito: a aplicacao NUNCA altera, apaga nem le diretamente o log
+REVOKE ALL ON audit.log FROM vlos_app;
+GRANT INSERT ON audit.log TO vlos_app;
+GRANT USAGE, SELECT ON SEQUENCE audit.log_id_seq TO vlos_app;
+
+-- A aplicacao nao calcula hashes diretamente
+REVOKE ALL ON FUNCTION audit.canonical_bytes(timestamptz, text, uuid, text, text, uuid, text, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION audit.canonical_bytes(timestamptz, text, uuid, text, text, uuid, text, jsonb) FROM vlos_app;
 
 -- -----------------------------------------------------------------------------
 -- Verificacao da cadeia (job diario -- Doc 04, secao 6).
