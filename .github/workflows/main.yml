@@ -47,9 +47,14 @@ jobs:
 
       - name: 🏗️ Executar Migrations (Construir banco)
         run: npm run db:migrate
-        env:
+        env:        
           DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
-
+     
+      - name: 🌱 Popular Banco (Seed)
+        run: npm run db:seed
+        env:        
+          DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
+     
       - name: 🛡️ Testes de Segurança, RLS e Auditoria
         env:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
