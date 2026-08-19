@@ -108,7 +108,8 @@ BEGIN
 END;
 $fn$ LANGUAGE plpgsql STABLE SET search_path = pg_catalog, public, extensions;
 
--- Permissoes restritas para a aplicacao
+-- Permissoes para a role da aplicacao
+GRANT USAGE ON SCHEMA audit TO vlos_app;
 REVOKE ALL ON audit.log FROM vlos_app;
 GRANT INSERT ON audit.log TO vlos_app;
 GRANT USAGE, SELECT ON SEQUENCE audit.log_id_seq TO vlos_app;
