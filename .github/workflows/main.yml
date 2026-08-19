@@ -56,8 +56,10 @@ jobs:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
      
       - name: 🛡️ Testes de Segurança, RLS e Auditoria
+        run: npx vitest run --run --pool=forks --poolOptions.forks.singleFork=true
         env:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
+          TEST_DATABASE_URL_APP: postgres://vlos_app:vetra_password@localhost:5432/vetra_test
+          TEST_DATABASE_URL_MIGRATOR: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
           DB_PASSWORD: vetra_password
-        run: npx vitest run --run --pool=forks --poolOptions.forks.singleFork=true
-        
+         
