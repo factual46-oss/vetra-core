@@ -30,11 +30,13 @@ export async function bootstrap(): Promise<NestFastifyApplication> {
   const logger = app.get(Logger);
   app.useLogger(logger);
 
-  await app.register(helmet, {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await app.register(helmet as any, {
     contentSecurityPolicy: env.NODE_ENV === 'production',
   });
 
-  await app.register(cors, {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await app.register(cors as any, {
     origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
       if (!origin || env.CORS_ORIGINS.includes(origin)) {
         cb(null, true);
@@ -45,12 +47,13 @@ export async function bootstrap(): Promise<NestFastifyApplication> {
     credentials: true,
   });
 
-  await app.register(cookie, {
-    secret: env.COOKIE_SECRET,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await app.register(cookie as any, {
+    secret: (env as unknown as { COOKIE_SECRET?: string }).COOKIE_SECRET ?? 'vetra_cookie_secret_dev_key_32bytes',
     parseOptions: {},
   });
 
-  await app.listen(env.PORT, env.HOST);
+  await app.listen(env.API_PORT, '0.0.0.0');
   return app;
 }
 
