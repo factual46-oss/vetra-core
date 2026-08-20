@@ -5,7 +5,6 @@ import type { KeyLike } from 'jose';
 import { getEnv } from '../../../config/env.js';
 import {
   type JwtKey,
-  type JwtKeySet,
   parseKeySet,
   resolveVerificationKey,
   selectSigningKey,
@@ -52,7 +51,7 @@ export interface SignTokenParams {
 @Injectable()
 export class JwtService {
   private readonly logger = new Logger(JwtService.name);
-  private keyset: JwtKeySet | null = null;
+  private keyset: JwtKey[] | null = null;
   private signingKeyCache: { key: JwtKey; parsed: KeyLike | Uint8Array } | null = null;
   private readonly verificationKeyCache = new Map<string, KeyLike | Uint8Array>();
 
@@ -60,8 +59,8 @@ export class JwtService {
     this.loadKeyset();
   }
 
-  private loadKeyset(): JwtKeySet | null {
-    if (this.keyset) return this.keyset;
+  private loadKeyset(): JwtKey[] | null {
+    if (this.keyset && this.keyset.length > 0) return this.keyset;
     try {
       const env = getEnv() as unknown as { JWT_KEYS_JSON?: string; JWT_KEY_SET_JSON?: string };
       const rawJson = env.JWT_KEYS_JSON ?? env.JWT_KEY_SET_JSON ?? process.env.JWT_KEYS_JSON ?? process.env.JWT_KEY_SET_JSON;
@@ -70,14 +69,14 @@ export class JwtService {
         return this.keyset;
       }
     } catch {
-      // Ignora durante instanciação em testes unitários que mockam o serviço
+      // Ignora durante instanciação se o ambiente ainda não foi injetado
     }
     return null;
   }
 
-  private ensureKeyset(): JwtKeySet {
+  private ensureKeyset(): JwtKey[] {
     const keyset = this.loadKeyset();
-    if (!keyset) {
+    if (!keyset || keyset.length === 0) {
       throw new Error('JWT Keyset não configurado');
     }
     return keyset;
@@ -92,7 +91,7 @@ export class JwtService {
     }
 
     const keyset = this.ensureKeyset();
-    const signingKey = selectSigningKey(keyset);
+    const signingKey = selectSigningKey(keyset, new Date());
     const parsedKey = await this.resolvePrivateKey(signingKey);
     const jti = randomUUID();
     const expiresInSeconds = 600;
@@ -133,7 +132,7 @@ export class JwtService {
     }
 
     const keyset = this.ensureKeyset();
-    const matchingKey = resolveVerificationKey(keyset, header.kid);
+    const matchingKey = resolveVerificationKey(keyset, header.kid, new Date());
     if (!matchingKey) {
       throw new InvalidTokenError('UNKNOWN_KID', `Unknown or expired key id: ${header.kid}`, header.kid);
     }
