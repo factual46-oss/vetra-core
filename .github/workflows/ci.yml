@@ -83,12 +83,16 @@ jobs:
             echo "Aguardando PostgreSQL..."
             sleep 1
           done
-
+          
       - name: Criar roles no banco
+        env:
+          POSTGRES_USER: vlos_migrator
+          POSTGRES_PASSWORD: vetra_password
+          POSTGRES_DB: vetra_test
         run: |
           chmod +x db/init/01-roles.sh
           DATABASE_URL="postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test" ./db/init/01-roles.sh
-
+      
       - name: Executar Migrations
         env:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
