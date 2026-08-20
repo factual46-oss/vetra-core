@@ -10,6 +10,9 @@ jobs:
   quality:
     name: Qualidade e Testes Unitários
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./vetra-fase0.5/vehicle-life-os
     steps:
       - name: Baixar o código
         uses: actions/checkout@v4
@@ -18,10 +21,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
 
       - name: Instalar dependências
-        run: npm ci
+        run: npm install
 
       - name: Typecheck
         run: npm run typecheck
@@ -35,6 +37,9 @@ jobs:
   database:
     name: Testes de Banco, Segurança e Autenticação
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./vetra-fase0.5/vehicle-life-os
     services:
       postgres:
         image: postgres:16-alpine
@@ -68,10 +73,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
 
       - name: Instalar dependências
-        run: npm ci
+        run: npm install
 
       - name: Aguardar serviços
         run: |
