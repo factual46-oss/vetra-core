@@ -11,9 +11,14 @@ import {
 } from '../domain/jwt-keyset.js';
 
 export class InvalidTokenError extends Error {
-  constructor(message: string) {
+  readonly kind: string;
+  readonly kid?: string;
+
+  constructor(kind: string, message: string, kid?: string) {
     super(message);
     this.name = 'InvalidTokenError';
+    this.kind = kind;
+    this.kid = kid;
   }
 }
 
@@ -26,50 +31,70 @@ export interface AccessTokenClaims {
   aud: string;
 }
 
+export interface SignTokenResult {
+  token: string;
+  expiresInSeconds: number;
+}
+
+export interface SignTokenParams {
+  userId?: string;
+  sessionId?: string;
+  sub?: string;
+  sid?: string;
+  amr?: string[];
+}
+
 @Injectable()
 export class JwtService {
   private readonly logger = new Logger(JwtService.name);
-  private readonly keyset = parseKeySet((getEnv() as unknown as { JWT_KEYS_JSON?: string; JWT_KEY_SET_JSON?: string }).JWT_KEYS_JSON ?? (getEnv() as unknown as { JWT_KEY_SET_JSON?: string }).JWT_KEY_SET_JSON ?? '[]');
+  private readonly keyset = parseKeySet(getEnv().JWT_KEYS_JSON);
   private signingKeyCache: { key: JwtKey; parsed: KeyLike | Uint8Array } | null = null;
   private readonly verificationKeyCache = new Map<string, KeyLike | Uint8Array>();
 
-  async sign(claims: { sub: string; sid: string; amr?: string[] }): Promise<string> {
-    return this.signAccessToken(claims);
-  }
+  async sign(params: SignTokenParams): Promise<SignTokenResult> {
+    const sub = params.userId ?? params.sub;
+    const sid = params.sessionId ?? params.sid;
 
-  async verify(token: string): Promise<AccessTokenClaims> {
-    return this.verifyAccessToken(token);
-  }
+    if (!sub || !sid) {
+      throw new Error('sub and sid are required to sign an access token');
+    }
 
-  async signAccessToken(claims: { sub: string; sid: string; amr?: string[] }): Promise<string> {
-    const signingKey = selectSigningKey(this.keyset);
+    const signingKey = selectSigningKey(this.keyset, new Date());
     const parsedKey = await this.resolvePrivateKey(signingKey);
     const jti = randomUUID();
+    const expiresInSeconds = 600;
 
-    return new SignJWT({
-      sid: claims.sid,
-      amr: claims.amr ?? ['pwd'],
+    const token = await new SignJWT({
+      sid,
+      amr: params.amr ?? ['pwd'],
     })
       .setProtectedHeader({ alg: 'EdDSA', kid: signingKey.kid, typ: 'JWT' })
-      .setSubject(claims.sub)
+      .setSubject(sub)
       .setIssuer('urn:vetra:auth')
       .setAudience('urn:vetra:api')
       .setJti(jti)
       .setIssuedAt()
       .setExpirationTime('10m')
       .sign(parsedKey);
+
+    return {
+      token,
+      expiresInSeconds,
+    };
   }
 
-  async verifyAccessToken(token: string): Promise<AccessTokenClaims> {
+  async verify(token: string): Promise<AccessTokenClaims> {
     try {
       const header = decodeProtectedHeader(token);
       if (!header.kid) {
-        throw new InvalidTokenError('Token missing kid');
+        throw new InvalidTokenError('missing_kid', 'Token missing kid header');
       }
-      const matchingKey = resolveVerificationKey(this.keyset, header.kid);
+
+      const matchingKey = resolveVerificationKey(this.keyset, header.kid, new Date());
       if (!matchingKey) {
-        throw new InvalidTokenError(`Unknown kid: ${header.kid}`);
+        throw new InvalidTokenError('unknown_kid', `Unknown or expired key id: ${header.kid}`, header.kid);
       }
+
       const parsedKey = await this.resolvePublicKey(matchingKey);
 
       const { payload } = await jwtVerify(token, parsedKey, {
@@ -91,7 +116,7 @@ export class JwtService {
         throw err;
       }
       const message = err instanceof Error ? err.message : 'Invalid token';
-      throw new InvalidTokenError(message);
+      throw new InvalidTokenError('verification_failed', message);
     }
   }
 
@@ -99,7 +124,7 @@ export class JwtService {
     if (this.signingKeyCache?.key.kid === key.kid) {
       return this.signingKeyCache.parsed;
     }
-    const pem = (key as unknown as { privatePem?: string; private_key_pem?: string }).privatePem ?? (key as unknown as { private_key_pem?: string }).private_key_pem;
+    const pem = key.privatePem;
     if (!pem) {
       throw new Error(`Chave privada ausente para kid=${key.kid}`);
     }
@@ -112,7 +137,7 @@ export class JwtService {
     const cached = this.verificationKeyCache.get(key.kid);
     if (cached) return cached;
 
-    const pem = (key as unknown as { publicPem?: string; public_key_pem?: string }).publicPem ?? (key as unknown as { public_key_pem?: string }).public_key_pem;
+    const pem = key.publicPem;
     if (!pem) {
       throw new Error(`Chave pública ausente para kid=${key.kid}`);
     }
