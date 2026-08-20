@@ -86,6 +86,8 @@ jobs:
           
       - name: Criar roles no banco
         env:
+          PGHOST: localhost
+          PGPORT: 5432
           POSTGRES_USER: vlos_migrator
           POSTGRES_PASSWORD: vetra_password
           POSTGRES_DB: vetra_test
