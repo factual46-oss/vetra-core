@@ -63,7 +63,11 @@ export class JwtService {
     if (this.keyset && this.keyset.length > 0) return this.keyset;
     try {
       const env = getEnv() as unknown as { JWT_KEYS_JSON?: string; JWT_KEY_SET_JSON?: string };
-      const rawJson = env.JWT_KEYS_JSON ?? env.JWT_KEY_SET_JSON ?? process.env.JWT_KEYS_JSON ?? process.env.JWT_KEY_SET_JSON;
+      const rawJson =
+        env.JWT_KEYS_JSON ??
+        env.JWT_KEY_SET_JSON ??
+        process.env.JWT_KEYS_JSON ??
+        process.env.JWT_KEY_SET_JSON;
       if (rawJson) {
         this.keyset = parseKeySet(rawJson);
         return this.keyset;
@@ -91,7 +95,7 @@ export class JwtService {
     }
 
     const keyset = this.ensureKeyset();
-    const signingKey = selectSigningKey(keyset, new Date());
+    const signingKey = selectSigningKey(keyset);
     const parsedKey = await this.resolvePrivateKey(signingKey);
     const jti = randomUUID();
     const expiresInSeconds = 600;
@@ -132,7 +136,7 @@ export class JwtService {
     }
 
     const keyset = this.ensureKeyset();
-    const matchingKey = resolveVerificationKey(keyset, header.kid, new Date());
+    const matchingKey = resolveVerificationKey(keyset, header.kid);
     if (!matchingKey) {
       throw new InvalidTokenError('UNKNOWN_KID', `Unknown or expired key id: ${header.kid}`, header.kid);
     }
