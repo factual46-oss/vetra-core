@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type pg from 'pg';
-import { APP_URL, HAS_DB, MIGRATOR_URL, asUser, connect, expectRejection } from '../helpers/db.js';
+import { APP_URL, MIGRATOR_URL, asUser, connect, expectRejection } from '../helpers/db.js';
 
 /**
  * REQUISITO DE SEGURANCA CRITICO (gate itens 7, 8, 9).
