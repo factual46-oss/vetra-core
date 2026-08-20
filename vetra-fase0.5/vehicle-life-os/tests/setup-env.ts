@@ -1,7 +1,16 @@
 const validTestKeySet = [
   {
+    kid: 'test-active',
+    status: 'active',
+    use: 'sig',
+    created_at: '2026-01-01T00:00:00.000Z',
+    public_key_pem: '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAPm1zV1Z6e9U07FvK4a0h8R+x8UjRkZ+m3l7m/QZ+M0Q=\n-----END PUBLIC KEY-----',
+    private_key_pem: '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIP4N1rZzZqI7QpX6qM3q5w4j7GZ6+9t6d5F0j8X4uWq7\n-----END PRIVATE KEY-----',
+    publicPem: '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAPm1zV1Z6e9U07FvK4a0h8R+x8UjRkZ+m3l7m/QZ+M0Q=\n-----END PUBLIC KEY-----',
+    privatePem: '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIP4N1rZzZqI7QpX6qM3q5w4j7GZ6+9t6d5F0j8X4uWq7\n-----END PRIVATE KEY-----',
+  },
+  {
     kid: 'vetra-key-2026-01',
-    alg: 'EdDSA',
     status: 'active',
     use: 'sig',
     created_at: '2026-01-01T00:00:00.000Z',
