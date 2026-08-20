@@ -2,7 +2,23 @@ import type { Params } from 'nestjs-pino';
 import { getEnv } from '../../config/env.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-export function createLoggerOptions(): Params {
+export const REDACTED_PATHS = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers["x-api-key"]',
+  'res.headers["set-cookie"]',
+  'password',
+  'password_hash',
+  'token',
+  'refreshToken',
+  'accessToken',
+  'secret',
+  '*.password',
+  '*.secret',
+  '*.token',
+];
+
+export function buildLoggerOptions(): Params {
   const env = getEnv();
   const isDev = env.NODE_ENV === 'development';
 
@@ -20,21 +36,7 @@ export function createLoggerOptions(): Params {
           }
         : undefined,
       redact: {
-        paths: [
-          'req.headers.authorization',
-          'req.headers.cookie',
-          'req.headers["x-api-key"]',
-          'res.headers["set-cookie"]',
-          'password',
-          'password_hash',
-          'token',
-          'refreshToken',
-          'accessToken',
-          'secret',
-          '*.password',
-          '*.secret',
-          '*.token',
-        ],
+        paths: REDACTED_PATHS,
         censor: '[REDACTED]',
       },
       serializers: {
@@ -65,3 +67,5 @@ export function createLoggerOptions(): Params {
     },
   };
 }
+
+export const createLoggerOptions = buildLoggerOptions;
