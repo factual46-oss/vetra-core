@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type pg from 'pg';
+import type { Client } from 'pg';
 import { APP_URL, HAS_DB, MIGRATOR_URL, connect, expectRejection } from '../helpers/db.js';
 
 /**
@@ -12,8 +12,8 @@ import { APP_URL, HAS_DB, MIGRATOR_URL, connect, expectRejection } from '../help
  * E os privilegios provam uma terceira: a aplicacao escreve no log, mas nao o le
  * nem o altera.
  */
-describe ('cadeia de hash do log auditavel', () => {
-  let db: pg.Client;
+describe.skipIf(!HAS_DB)('cadeia de hash do log auditavel', () => {
+  let db: Client;
   let firstId: number;
 
   beforeAll(async () => {
@@ -84,8 +84,8 @@ describe ('cadeia de hash do log auditavel', () => {
  * so uma frase no README.
  */
 describe.skipIf(!HAS_DB)('privilegios da aplicacao sobre audit.log', () => {
-  let app: pg.Client;
-  let migrator: pg.Client;
+  let app: Client;
+  let migrator: Client;
   const marker = `TEST_APP_INSERT_${Date.now()}`;
 
   beforeAll(async () => {

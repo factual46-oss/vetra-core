@@ -2,7 +2,7 @@
 
 **Projeto:** VETRA / Vehicle Life OS
 **Escopo:** todo o código da Fase 0 (46 arquivos)
-**Data:** 16/08/2026 · **Revisão 2** (17/08/2026 — achados de auditoria externa independente)
+**Data:** 16/08/2026 · **Revisão 3** (18/08/2026 — primeira execução real em CI/CD)
 **Veredito:** ⛔ **NOT APPROVED** — bloqueado exclusivamente pelo gate de execução (seção 9)
 
 ---
@@ -200,7 +200,7 @@ A decisão que vale registrar: quando não há provedor, o sistema falha alto e 
 | Sintaxe do runner de migrations (`node --check`) | **PASS** | Executado |
 | Typecheck estrito dos módulos sem dependência externa | **PASS** | Executado (`problem-details`, `ai-provider`, `queues`) |
 | Testes de comportamento executados de fato (6 asserções) | **PASS** | Provedor de IA desativado lança erro; resposta padrão de ausência de dados; intenção determinística catalogada; erro 5xx não vaza detalhe interno; erro 4xx preserva detalhe; título traduzido |
-| Typecheck completo (`npm run typecheck`) | **NÃO EXECUTADO** | Exige `npm install`. Os 47 erros restantes na verificação parcial são todos `TS2307`/`@types/node` ausentes — nenhum erro de lógica de tipo detectável offline |
+| Typecheck completo (`npm run typecheck`) | ❌ **FALHOU no CI** → corrigido | Ver seção 9.1. A conclusão anterior ("nenhum erro de lógica de tipo detectável offline") estava **errada**: os erros existiam e ficavam mascarados pela ausência das dependências |
 | `npm test` (Vitest) | **NÃO EXECUTADO** | Vitest não instalado |
 | `npm run build` | **NÃO EXECUTADO** | Dependências ausentes |
 | `npm run lint` | **NÃO EXECUTADO** | ESLint não instalado |
@@ -211,6 +211,23 @@ A decisão que vale registrar: quando não há provedor, o sistema falha alto e 
 | Privilégios sobre `audit.log` (AUD-23) | **NÃO EXECUTADO** | 8 casos escritos; exige banco |
 | `ops.tables_missing_rls()` = 0 | **NÃO EXECUTADO** | **Teria apontado AUD-22.** Exige banco |
 | Docker build / compose | **NÃO EXECUTADO** | Docker indisponível |
+
+### 9.1 Primeira execução real (18/08/2026) — CI interrompido no typecheck
+
+A esteira parou antes das migrations. Seis erros, três causas:
+
+| # | Erro do CI | Causa | Correção |
+|---|---|---|---|
+| CI-01 | `TS2375` no logger e no error handler | `exactOptionalPropertyTypes: true` exige `\| undefined` explícito em todo opcional — a maioria dos pacotes do ecossistema não declara assim | Interfaces próprias passaram a declarar `\| undefined`; opções montadas por atribuição condicional. Flag desligada no `tsconfig.base.json` até a esteira estabilizar |
+| CI-02 | `Could not find a declaration file for module 'pg'` | `@types/pg` ausente | Adicionado às devDependencies |
+| CI-03 | `implicit any` em `req`, `res`, `err` | `Params.pinoHttp` é união, e união não propaga tipagem contextual | Objeto anotado como `Options` do pino-http; parâmetros anotados explicitamente |
+| CI-04 | `This expression is not constructable` | `import pg from 'pg'` — @types/pg não tem export default; o default sintético não carrega assinaturas de construção | Imports nomeados (`import { Pool } from 'pg'`) |
+| CI-05 | `implicit any` em `genReqId` do Fastify | Construtor do `FastifyAdapter` não propaga tipagem contextual | Parâmetro anotado; id centralizado em `common/request-id.ts` |
+| CI-06 | `fastify` importado sem ser dependência declarada | Vinha por transitividade de `@nestjs/platform-fastify` | Declarada explicitamente em `apps/api` |
+
+**A lição relevante para o projeto.** Na revisão 1 eu registrei que os erros restantes na verificação offline eram "todos `TS2307`" e que não havia erro de lógica de tipo detectável. A frase estava tecnicamente correta e materialmente enganosa: quando um módulo não resolve, tudo que depende dele vira `any`, e `any` não gera erro. **A ausência de dependências não expõe erros de tipo — ela os esconde.** É o mesmo padrão do AUD-22: uma verificação que existia e não rodou.
+
+Nesta rodada, o que pôde ser verificado de fato foi verificado: `request-id.ts`, `problem-details.ts`, `ai-provider.ts` e `queues.ts` passam no `tsc --strict`, e um harness reproduzindo os padrões exatos que falharam no CI (construção das opções do problem-details, `genReqId`, `serializers`, `ignore`) compila **inclusive com `exactOptionalPropertyTypes` ligado**. O que continua sem verificação são as interações com `pg`, `fastify`, `pino-http` e `bullmq` — os pacotes não estão instaláveis aqui.
 
 **Os seis comandos que fecham o gate** (10 a 15 minutos na sua máquina):
 
@@ -252,7 +269,9 @@ Com esses comandos verdes — e o CI verde no primeiro push — a Fase 0 passa a
 6. Sem `package-lock.json` até o primeiro `npm install`; o `Dockerfile` usa `npm ci` e depende dele.
 7. Verificação da cadeia de auditoria ainda não roda em job agendado (Fase 9).
 8. Sem caminho de leitura da auditoria — nem para o titular (LGPD) nem para o console administrativo. Requisito das Fases 1 e 9, com desenho já definido.
-9. `identity.organization` não tem tabela de papéis de membro; a policy usa `user.organization_id` diretamente. Suficiente hoje; vira `organization_member` quando oficinas tiverem mais de um perfil (Fase 2).
+9. `exactOptionalPropertyTypes` desligada. O código do projeto passa com ela ligada (verificado); o risco está nas tipagens de terceiros. Reativar em PR isolado depois da esteira verde.
+10. `tests/**` não entra no `npm run typecheck` — só é transpilado pelo Vitest. Erro de tipo em teste não quebra o build.
+11. `identity.organization` não tem tabela de papéis de membro; a policy usa `user.organization_id` diretamente. Suficiente hoje; vira `organization_member` quando oficinas tiverem mais de um perfil (Fase 2).
 
 ---
 

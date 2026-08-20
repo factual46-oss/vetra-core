@@ -1,10 +1,10 @@
 import { Worker } from 'bullmq';
 import type { Job } from 'bullmq';
 import { Redis } from 'ioredis';
-import { pino } from 'pino';
+import pino from 'pino';
 import { QUEUES, type QueueName } from './queues.js';
 
-/*
+/**
  * Processo de workers (Fase 0: esqueleto com uma fila real).
  * Os processadores de OCR, IA e alertas entram nas Fases 5, 6 e 7 -- cada um
  * como arquivo proprio registrado aqui. Nada de processamento pesado no ciclo

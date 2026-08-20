@@ -5,9 +5,12 @@ import { REDACTED_PATHS } from '../infra/logging/logger.options.js';
 const KEY_A = Buffer.alloc(32, 1).toString('base64');
 const KEY_B = Buffer.alloc(32, 2).toString('base64');
 const KEY_C = Buffer.alloc(32, 3).toString('base64');
+const KEY_D = Buffer.alloc(32, 4).toString('base64');
 
 const baseEnv = {
   DATABASE_URL: 'postgres://vlos_app:x@localhost:5432/vlos',
+  // Fase 1A: pool separado do modulo de autenticacao (Alternativa B).
+  DATABASE_AUTH_URL: 'postgres://vlos_auth:x@localhost:5432/vlos',
   REDIS_URL: 'redis://localhost:6379',
 };
 
@@ -17,6 +20,7 @@ const prodEnv = {
   APP_KEK_BASE64: KEY_A,
   IDENTIFIER_PEPPER_BASE64: KEY_B,
   AUDIT_IP_HASH_KEY_BASE64: KEY_C,
+  AUTH_PEPPER_BASE64: KEY_D,
   CORS_ORIGINS: 'https://app.vetra.com.br',
 };
 
@@ -112,4 +116,39 @@ describe('redacao de logs', () => {
       expect(REDACTED_PATHS).toContain(field);
     },
   );
+});
+
+describe('segregacao de roles (Fase 1A)', () => {
+  it('recusa DATABASE_AUTH_URL que nao seja vlos_auth', () => {
+    expect(() =>
+      loadEnv({ ...baseEnv, DATABASE_AUTH_URL: 'postgres://vlos_app:x@localhost:5432/vlos' } as NodeJS.ProcessEnv),
+    ).toThrowError(/vlos_auth/);
+  });
+
+  it('recusa a role de migracao no pool de autenticacao', () => {
+    expect(() =>
+      loadEnv({
+        ...baseEnv,
+        DATABASE_AUTH_URL: 'postgres://vlos_migrator:x@localhost:5432/vlos',
+      } as NodeJS.ProcessEnv),
+    ).toThrowError(/vlos_auth|migracao|RLS/);
+  });
+
+  it('exige AUTH_PEPPER em producao', () => {
+    expect(() => loadEnv({ ...prodEnv, AUTH_PEPPER_BASE64: '' } as NodeJS.ProcessEnv)).toThrowError(
+      /AUTH_PEPPER_BASE64/,
+    );
+  });
+
+  it('recusa pepper de senha igual a KEK', () => {
+    expect(() => loadEnv({ ...prodEnv, AUTH_PEPPER_BASE64: KEY_A } as NodeJS.ProcessEnv)).toThrowError(
+      /diferente da KEK/,
+    );
+  });
+
+  it('recusa cookie sem Secure em producao', () => {
+    expect(() => loadEnv({ ...prodEnv, COOKIE_SECURE: 'false' } as NodeJS.ProcessEnv)).toThrowError(
+      /COOKIE_SECURE/,
+    );
+  });
 });

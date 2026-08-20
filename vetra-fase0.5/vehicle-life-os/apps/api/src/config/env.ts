@@ -31,11 +31,53 @@ const schema = z
 
     DATABASE_URL: z.string().url(),
     DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
+
+    /**
+     * Fase 1A / Alternativa B: pool separado com a role vlos_auth, usada
+     * exclusivamente pelo modulo de autenticacao. Ela nao tem privilegio sobre
+     * tabela alguma alem de session e refresh_token, e e a unica que executa as
+     * funcoes de credencial.
+     */
+    DATABASE_AUTH_URL: z.string().url(),
+    DATABASE_AUTH_POOL_MAX: z.coerce.number().int().positive().default(5),
+
     REDIS_URL: z.string().url(),
 
     APP_KEK_BASE64: base64Key(32).or(z.literal('')).default(''),
     IDENTIFIER_PEPPER_BASE64: base64Key(32).or(z.literal('')).default(''),
     AUDIT_IP_HASH_KEY_BASE64: base64Key(32).or(z.literal('')).default(''),
+
+    // --- Fase 1A: autenticacao -------------------------------------------
+    /**
+     * Pepper aplicado por HMAC antes do Argon2. Vive apenas na memoria da
+     * aplicacao. E o que faz um hash extraido do banco nao valer nada para
+     * ataque offline. Perde-lo invalida todas as senhas -- material critico de
+     * backup, com custodia propria.
+     */
+    AUTH_PEPPER_BASE64: base64Key(32).or(z.literal('')).default(''),
+
+    /** Conjunto de chaves EdDSA. Ver domain/jwt-keyset.ts. */
+    JWT_KEYS_JSON: z.string().default('[]'),
+    JWT_ISSUER: z.string().default('vetra'),
+    JWT_AUDIENCE: z.string().default('vetra-api'),
+    ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(600),
+    REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().max(90).default(30),
+    SESSION_TTL_DAYS: z.coerce.number().int().positive().max(90).default(30),
+
+    /**
+     * Argon2id. Minimo OWASP: m >= 19456 KiB, t >= 2, p >= 1.
+     * Os valores finais devem sair do benchmark no hardware real
+     * (tools/bench-argon2.mjs), nao deste padrao.
+     */
+    ARGON2_MEMORY_KIB: z.coerce.number().int().min(19456).default(19456),
+    ARGON2_TIME_COST: z.coerce.number().int().min(2).default(3),
+    ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(16).default(1),
+
+    COOKIE_SECURE: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((v) => v === 'true'),
+    COOKIE_DOMAIN: z.string().default(''),
 
     /** Um unico provedor de IA no MVP (gate item 31). `none` = IA desligada. */
     AI_PROVIDER: z.enum(['none', 'anthropic', 'openai', 'google', 'local']).default('none'),
@@ -69,7 +111,26 @@ const schema = z
         fail('AI_MONTHLY_USER_TOKEN_LIMIT', 'limite por usuario deve ser > 0 quando a IA esta habilitada');
     }
 
+    // A aplicacao de auth nao pode usar a role generica, e vice-versa:
+    // trocar as duas desfaria a segregacao da Alternativa B em silencio.
+    if (!/(^|[:/@])vlos_auth([:@]|$)/.test(env.DATABASE_AUTH_URL)) {
+      fail('DATABASE_AUTH_URL', 'deve conectar como vlos_auth');
+    }
+    if (/(^|[:/@])vlos_migrator([:@]|$)/.test(env.DATABASE_AUTH_URL)) {
+      fail('DATABASE_AUTH_URL', 'a role de migracao nao e submetida a RLS. Use vlos_auth.');
+    }
+
     if (env.NODE_ENV !== 'production') return;
+
+    if (env.AUTH_PEPPER_BASE64 === '') {
+      fail('AUTH_PEPPER_BASE64', 'obrigatorio em producao: sem pepper, hash extraido do banco e crackavel offline');
+    }
+    if (env.AUTH_PEPPER_BASE64 !== '' && env.AUTH_PEPPER_BASE64 === env.APP_KEK_BASE64) {
+      fail('AUTH_PEPPER_BASE64', 'o pepper de senha deve ser diferente da KEK');
+    }
+    if (!env.COOKIE_SECURE) {
+      fail('COOKIE_SECURE', 'cookie sem Secure em producao trafega em claro');
+    }
 
     for (const key of ['APP_KEK_BASE64', 'IDENTIFIER_PEPPER_BASE64', 'AUDIT_IP_HASH_KEY_BASE64'] as const) {
       if (env[key] === '') fail(key, 'obrigatoria em producao');

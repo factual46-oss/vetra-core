@@ -1,20 +1,20 @@
 import { randomUUID } from 'node:crypto';
 
 /**
- * Contrato estrutural mínimo, em vez de amarrar a um tipo concreto do Node.
+ * Contrato estrutural minimo, em vez de amarrar a um tipo concreto do Node.
  *
  * CI-07: o Fastify tipa genReqId como `(req: IncomingMessage | Http2ServerRequest)`.
- * Uma função que aceita só IncomingMessage não é atribuível a essa assinatura
- * (contravariância de parâmetro). Descrevendo apenas o que a função realmente
- * usa — headers e id — tanto IncomingMessage quanto Http2ServerRequest passam
- * a satisfazer o contrato sem cast, e a mesma função serve ao Fastify e ao pino.
+ * Uma funcao que aceita so IncomingMessage nao e atribuivel a essa assinatura
+ * (contravariancia de parametro). Descrevendo apenas o que a funcao realmente
+ * usa -- headers e id -- tanto IncomingMessage quanto Http2ServerRequest passam
+ * a satisfazer o contrato sem cast, e a mesma funcao serve ao Fastify e ao pino.
  */
 export interface RequestWithId {
   id?: string;
   headers: { [key: string]: string | string[] | undefined };
 }
 
-/** Aceita apenas ids simples: header de proxy não vira vetor de log injection. */
+/** Aceita apenas ids simples: header de proxy nao vira vetor de log injection. */
 const SAFE_ID = /^[\w-]{1,64}$/;
 
 export function resolveRequestId(req: RequestWithId): string {

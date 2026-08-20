@@ -12,6 +12,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:-dev-app}
       MIGRATOR_DB_PASSWORD: ${MIGRATOR_DB_PASSWORD:-dev-migrator}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:-dev-auth}
     ports:
       - "127.0.0.1:5432:5432"   # so localhost, nem em dev fica aberto na rede
     volumes:
@@ -62,6 +63,7 @@ services:
     env_file: [../../.env]
     environment:
       DATABASE_URL: postgres://vlos_app:${APP_DB_PASSWORD:-dev-app}@postgres:5432/vlos
+      DATABASE_AUTH_URL: postgres://vlos_auth:${AUTH_DB_PASSWORD:-dev-auth}@postgres:5432/vlos
       REDIS_URL: redis://:${REDIS_PASSWORD:-dev-redis}@redis:6379
     ports:
       - "127.0.0.1:3000:3000"
@@ -81,6 +83,7 @@ services:
     env_file: [../../.env]
     environment:
       DATABASE_URL: postgres://vlos_app:${APP_DB_PASSWORD:-dev-app}@postgres:5432/vlos
+      DATABASE_AUTH_URL: postgres://vlos_auth:${AUTH_DB_PASSWORD:-dev-auth}@postgres:5432/vlos
       REDIS_URL: redis://:${REDIS_PASSWORD:-dev-redis}@redis:6379
     volumes:
       - ../..:/app

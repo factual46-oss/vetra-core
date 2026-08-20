@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type pg from 'pg';
-import { APP_URL, MIGRATOR_URL, asUser, connect, expectRejection } from '../helpers/db.js';
+import type { Client } from 'pg';
+import { APP_URL, HAS_DB, MIGRATOR_URL, asUser, connect, expectRejection } from '../helpers/db.js';
 
 /**
  * REQUISITO DE SEGURANCA CRITICO (gate itens 7, 8, 9).
@@ -17,9 +17,9 @@ import { APP_URL, MIGRATOR_URL, asUser, connect, expectRejection } from '../help
  * arquivo ganha os mesmos casos para veiculo, evento e documento -- a estrutura
  * ja esta pronta para isso.
  */
-describe ('isolamento entre usuarios (RLS)', () => {
-  let app: pg.Client;
-  let migrator: pg.Client;
+describe.skipIf(!HAS_DB)('isolamento entre usuarios (RLS)', () => {
+  let app: Client;
+  let migrator: Client;
   let userA: string;
   let userB: string;
   let orgA: string;
