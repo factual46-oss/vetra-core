@@ -22,10 +22,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev:down": "docker compose --env-file .env -f infra/docker/docker-compose.dev.yml down",
-    "test:db": "vitest run tests/"
+    "test:db": "vitest run tests",
+    "test:unit": "vitest run apps packages"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.10",
     "eslint": "^9.17.0",
     "pg": "^8.13.1",
     "prettier": "^3.4.2",
