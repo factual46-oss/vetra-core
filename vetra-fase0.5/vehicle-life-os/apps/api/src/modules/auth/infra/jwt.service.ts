@@ -7,10 +7,10 @@ import * as keysetModule from '../domain/jwt-keyset.js';
 import type { JwtKey } from '../domain/jwt-keyset.js';
 
 export class InvalidTokenError extends Error {
-  readonly kind: string;
+  readonly kind: 'BAD_ALGORITHM' | 'UNKNOWN_KID' | 'MISSING_KID' | 'EXPIRED' | 'INVALID_SIGNATURE' | 'MALFORMED';
   readonly kid?: string;
 
-  constructor(kind: string, message: string, kid?: string) {
+  constructor(kind: 'BAD_ALGORITHM' | 'UNKNOWN_KID' | 'MISSING_KID' | 'EXPIRED' | 'INVALID_SIGNATURE' | 'MALFORMED', message: string, kid?: string) {
     super(message);
     this.name = 'InvalidTokenError';
     this.kind = kind;
@@ -49,20 +49,18 @@ export class JwtService {
   private readonly verificationKeyCache = new Map<string, KeyLike | Uint8Array>();
 
   constructor() {
-    this.reloadKeyset();
+    this.initKeyset();
   }
 
-  reloadKeyset(): void {
+  private initKeyset(): void {
     try {
       const env = getEnv() as unknown as { JWT_KEYS_JSON?: string; JWT_KEY_SET_JSON?: string };
-      const rawJson = env.JWT_KEYS_JSON ?? env.JWT_KEY_SET_JSON;
-      if (rawJson) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const parseFn = (keysetModule as any).parseKeySet;
-        this.keyset = parseFn(rawJson, new Date());
-      }
+      const rawJson = env.JWT_KEYS_JSON ?? env.JWT_KEY_SET_JSON ?? '[]';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const parseFn = (keysetModule as any).parseKeySet;
+      this.keyset = parseFn(rawJson);
     } catch {
-      // Ignora falha de parse durante bootstrap de teste unitário isolado
+      // Deixa sob demanda se getEnv() ainda não estiver pronto
     }
   }
 
@@ -75,12 +73,12 @@ export class JwtService {
     }
 
     if (!this.keyset) {
-      this.reloadKeyset();
+      this.initKeyset();
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const selectFn = (keysetModule as any).selectSigningKey;
-    const signingKey = selectFn(this.keyset, new Date());
+    const signingKey = selectFn(this.keyset);
     const parsedKey = await this.resolvePrivateKey(signingKey);
     const jti = randomUUID();
     const expiresInSeconds = 600;
@@ -105,25 +103,35 @@ export class JwtService {
   }
 
   async verify(token: string): Promise<AccessTokenClaims> {
+    let header: { alg?: string; kid?: string };
     try {
-      const header = decodeProtectedHeader(token);
-      if (!header.kid) {
-        throw new InvalidTokenError('missing_kid', 'Token missing kid header');
-      }
+      header = decodeProtectedHeader(token);
+    } catch {
+      throw new InvalidTokenError('MALFORMED', 'Token cannot be decoded');
+    }
 
-      if (!this.keyset) {
-        this.reloadKeyset();
-      }
+    if (!header.kid) {
+      throw new InvalidTokenError('MISSING_KID', 'Token missing kid header');
+    }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const resolveFn = (keysetModule as any).resolveVerificationKey;
-      const matchingKey = resolveFn(this.keyset, header.kid, new Date());
-      if (!matchingKey) {
-        throw new InvalidTokenError('unknown_kid', `Unknown or expired key id: ${header.kid}`, header.kid);
-      }
+    if (header.alg !== 'EdDSA') {
+      throw new InvalidTokenError('BAD_ALGORITHM', `Unsupported algorithm: ${header.alg}`);
+    }
 
-      const parsedKey = await this.resolvePublicKey(matchingKey);
+    if (!this.keyset) {
+      this.initKeyset();
+    }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const resolveFn = (keysetModule as any).resolveVerificationKey;
+    const matchingKey = resolveFn(this.keyset, header.kid);
+    if (!matchingKey) {
+      throw new InvalidTokenError('UNKNOWN_KID', `Unknown or expired key id: ${header.kid}`, header.kid);
+    }
+
+    const parsedKey = await this.resolvePublicKey(matchingKey);
+
+    try {
       const { payload } = await jwtVerify(token, parsedKey, {
         issuer: 'urn:vetra:auth',
         audience: 'urn:vetra:api',
@@ -142,8 +150,11 @@ export class JwtService {
       if (err instanceof InvalidTokenError) {
         throw err;
       }
-      const message = err instanceof Error ? err.message : 'Invalid token';
-      throw new InvalidTokenError('verification_failed', message);
+      const code = (err as { code?: string }).code;
+      if (code === 'ERR_JWT_EXPIRED') {
+        throw new InvalidTokenError('EXPIRED', 'Token has expired');
+      }
+      throw new InvalidTokenError('INVALID_SIGNATURE', err instanceof Error ? err.message : 'Invalid signature');
     }
   }
 
