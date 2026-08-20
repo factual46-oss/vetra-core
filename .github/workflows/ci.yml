@@ -89,6 +89,9 @@ jobs:
           POSTGRES_USER: vlos_migrator
           POSTGRES_PASSWORD: vetra_password
           POSTGRES_DB: vetra_test
+          MIGRATOR_DB_PASSWORD: vetra_password
+          APP_DB_PASSWORD: vetra_password
+          AUTH_DB_PASSWORD: vetra_password
         run: |
           chmod +x db/init/01-roles.sh
           DATABASE_URL="postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test" ./db/init/01-roles.sh
