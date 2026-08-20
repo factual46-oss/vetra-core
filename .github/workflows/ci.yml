@@ -85,24 +85,21 @@ jobs:
           done
 
       - name: Criar roles no banco
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: vetra_password
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: vetra_password
+          POSTGRES_DB: vetra_test
+          MIGRATOR_DB_PASSWORD: vetra_password
+          APP_DB_PASSWORD: vetra_password
+          AUTH_DB_PASSWORD: vetra_password
+          DATABASE_URL: postgres://postgres:vetra_password@127.0.0.1:5432/vetra_test
         run: |
-          PGPASSWORD=vetra_password psql -h 127.0.0.1 -U postgres -d vetra_test << 'EOF'
-          DO $$
-          BEGIN
-            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'vlos_migrator') THEN
-              CREATE ROLE vlos_migrator WITH LOGIN PASSWORD 'vetra_password' CREATEDB;
-            END IF;
-            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'vlos_app') THEN
-              CREATE ROLE vlos_app WITH LOGIN PASSWORD 'vetra_password' NOSUPERUSER NOBYPASSRLS NOCREATEDB;
-            END IF;
-            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'vlos_auth') THEN
-              CREATE ROLE vlos_auth WITH LOGIN PASSWORD 'vetra_password' NOSUPERUSER NOBYPASSRLS NOCREATEDB;
-            END IF;
-          END
-          $$;
-          GRANT ALL PRIVILEGES ON DATABASE vetra_test TO vlos_migrator;
-          ALTER DATABASE vetra_test OWNER TO vlos_migrator;
-          EOF
+          chmod +x db/init/01-roles.sh
+          ./db/init/01-roles.sh
 
       - name: Executar Migrations
         env:
@@ -131,6 +128,4 @@ jobs:
           COOKIE_SECRET: vetra_cookie_secret_dev_key_32bytes
           CORS_ORIGINS: http://localhost:3000
           TRUSTED_PROXIES: 127.0.0.1
-          JWT_KEYS_JSON: >-
-            [{"kid":"vetra-key-2026-01","alg":"EdDSA","status":"active","createdAt":"2026-01-01T00:00:00.000Z","publicPem":"-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAPm1zV1Z6e9U07FvK4a0h8R+x8UjRkZ+m3l7m/QZ+M0Q=\n-----END PUBLIC KEY-----","privatePem":"-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIP4N1rZzZqI7QpX6qM3q5w4j7GZ6+9t6d5F0j8X4uWq7\n-----END PRIVATE KEY-----"}]
         run: npm run test:db
