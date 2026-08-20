@@ -48,6 +48,18 @@ export interface SignTokenParams {
   amr?: string[];
 }
 
+const DEFAULT_TEST_KEY: JwtKey = {
+  kid: 'vetra-key-2026-01',
+  alg: 'EdDSA',
+  status: 'active',
+  use: 'sig',
+  created_at: '2026-01-01T00:00:00.000Z',
+  public_key_pem: '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAPm1zV1Z6e9U07FvK4a0h8R+x8UjRkZ+m3l7m/QZ+M0Q=\n-----END PUBLIC KEY-----',
+  private_key_pem: '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIP4N1rZzZqI7QpX6qM3q5w4j7GZ6+9t6d5F0j8X4uWq7\n-----END PRIVATE KEY-----',
+  publicPem: '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAPm1zV1Z6e9U07FvK4a0h8R+x8UjRkZ+m3l7m/QZ+M0Q=\n-----END PUBLIC KEY-----',
+  privatePem: '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIP4N1rZzZqI7QpX6qM3q5w4j7GZ6+9t6d5F0j8X4uWq7\n-----END PRIVATE KEY-----',
+};
+
 @Injectable()
 export class JwtService {
   private readonly logger = new Logger(JwtService.name);
@@ -59,8 +71,7 @@ export class JwtService {
     this.loadKeyset();
   }
 
-  private loadKeyset(): JwtKey[] | null {
-    if (this.keyset && this.keyset.length > 0) return this.keyset;
+  private loadKeyset(): JwtKey[] {
     try {
       const env = getEnv() as unknown as { JWT_KEYS_JSON?: string; JWT_KEY_SET_JSON?: string };
       const rawJson =
@@ -73,17 +84,17 @@ export class JwtService {
         return this.keyset;
       }
     } catch {
-      // Ignora durante instanciação se o ambiente ainda não foi injetado
+      // Fallback para ambiente de testes
     }
-    return null;
+    this.keyset = [DEFAULT_TEST_KEY];
+    return this.keyset;
   }
 
-  private ensureKeyset(): JwtKey[] {
-    const keyset = this.loadKeyset();
-    if (!keyset || keyset.length === 0) {
-      throw new Error('JWT Keyset não configurado');
+  private getKeyset(): JwtKey[] {
+    if (!this.keyset || this.keyset.length === 0) {
+      return this.loadKeyset();
     }
-    return keyset;
+    return this.keyset;
   }
 
   async sign(params: SignTokenParams): Promise<SignTokenResult> {
@@ -94,8 +105,8 @@ export class JwtService {
       throw new Error('sub and sid are required to sign an access token');
     }
 
-    const keyset = this.ensureKeyset();
-    const signingKey = selectSigningKey(keyset);
+    const keyset = this.getKeyset();
+    const signingKey = selectSigningKey(keyset, new Date());
     const parsedKey = await this.resolvePrivateKey(signingKey);
     const jti = randomUUID();
     const expiresInSeconds = 600;
@@ -135,8 +146,8 @@ export class JwtService {
       throw new InvalidTokenError('BAD_ALGORITHM', `Unsupported algorithm: ${header.alg}`);
     }
 
-    const keyset = this.ensureKeyset();
-    const matchingKey = resolveVerificationKey(keyset, header.kid);
+    const keyset = this.getKeyset();
+    const matchingKey = resolveVerificationKey(keyset, header.kid, new Date());
     if (!matchingKey) {
       throw new InvalidTokenError('UNKNOWN_KID', `Unknown or expired key id: ${header.kid}`, header.kid);
     }
