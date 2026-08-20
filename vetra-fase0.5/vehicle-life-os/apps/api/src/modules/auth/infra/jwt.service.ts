@@ -49,18 +49,21 @@ export class JwtService {
   private readonly verificationKeyCache = new Map<string, KeyLike | Uint8Array>();
 
   constructor() {
-    this.initKeyset();
+    this.ensureKeyset();
   }
 
-  private initKeyset(): void {
+  private ensureKeyset(): any {
+    if (this.keyset) return this.keyset;
     try {
       const env = getEnv() as unknown as { JWT_KEYS_JSON?: string; JWT_KEY_SET_JSON?: string };
-      const rawJson = env.JWT_KEYS_JSON ?? env.JWT_KEY_SET_JSON ?? '[]';
+      const rawJson = env.JWT_KEYS_JSON ?? env.JWT_KEY_SET_JSON ?? process.env.JWT_KEYS_JSON ?? process.env.JWT_KEY_SET_JSON ?? '[]';
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const parseFn = (keysetModule as any).parseKeySet;
       this.keyset = parseFn(rawJson);
-    } catch {
-      // Deixa sob demanda se getEnv() ainda não estiver pronto
+      return this.keyset;
+    } catch (e) {
+      this.logger.error('Erro ao carregar keyset JWT', e);
+      throw e;
     }
   }
 
@@ -72,13 +75,10 @@ export class JwtService {
       throw new Error('sub and sid are required to sign an access token');
     }
 
-    if (!this.keyset) {
-      this.initKeyset();
-    }
-
+    const keyset = this.ensureKeyset();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const selectFn = (keysetModule as any).selectSigningKey;
-    const signingKey = selectFn(this.keyset);
+    const signingKey = selectFn(keyset);
     const parsedKey = await this.resolvePrivateKey(signingKey);
     const jti = randomUUID();
     const expiresInSeconds = 600;
@@ -118,13 +118,10 @@ export class JwtService {
       throw new InvalidTokenError('BAD_ALGORITHM', `Unsupported algorithm: ${header.alg}`);
     }
 
-    if (!this.keyset) {
-      this.initKeyset();
-    }
-
+    const keyset = this.ensureKeyset();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const resolveFn = (keysetModule as any).resolveVerificationKey;
-    const matchingKey = resolveFn(this.keyset, header.kid);
+    const matchingKey = resolveFn(keyset, header.kid);
     if (!matchingKey) {
       throw new InvalidTokenError('UNKNOWN_KID', `Unknown or expired key id: ${header.kid}`, header.kid);
     }
