@@ -79,15 +79,17 @@ jobs:
 
       - name: Aguardar serviços
         run: |
-          until pg_isready -h localhost -p 5432 -U vlos_migrator; do
+          until pg_isready -h 127.0.0.1 -p 5432 -U vlos_migrator; do
             echo "Aguardando PostgreSQL..."
             sleep 1
           done
-          
+
       - name: Criar roles no banco
         env:
-          PGHOST: localhost
+          PGHOST: 127.0.0.1
           PGPORT: 5432
+          PGUSER: vlos_migrator
+          PGPASSWORD: vetra_password
           POSTGRES_USER: vlos_migrator
           POSTGRES_PASSWORD: vetra_password
           POSTGRES_DB: vetra_test
@@ -96,22 +98,22 @@ jobs:
           AUTH_DB_PASSWORD: vetra_password
         run: |
           chmod +x db/init/01-roles.sh
-          DATABASE_URL="postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test" ./db/init/01-roles.sh
-      
+          DATABASE_URL="postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test" ./db/init/01-roles.sh
+
       - name: Executar Migrations
         env:
-          DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
+          DATABASE_URL: postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test
         run: npm run db:migrate
 
       - name: Executar Seed
         env:
-          DATABASE_URL: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
+          DATABASE_URL: postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test
         run: npm run db:seed
 
       - name: Testes de Integração e Segurança
         env:
-          TEST_DATABASE_URL_MIGRATOR: postgres://vlos_migrator:vetra_password@localhost:5432/vetra_test
-          TEST_DATABASE_URL_APP: postgres://vlos_app:vetra_password@localhost:5432/vetra_test
-          TEST_DATABASE_URL_AUTH: postgres://vlos_auth:vetra_password@localhost:5432/vetra_test
-          REDIS_URL: redis://localhost:6379
+          TEST_DATABASE_URL_MIGRATOR: postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test
+          TEST_DATABASE_URL_APP: postgres://vlos_app:vetra_password@127.0.0.1:5432/vetra_test
+          TEST_DATABASE_URL_AUTH: postgres://vlos_auth:vetra_password@127.0.0.1:5432/vetra_test
+          REDIS_URL: redis://127.0.0.1:6379
         run: npm run test:db
