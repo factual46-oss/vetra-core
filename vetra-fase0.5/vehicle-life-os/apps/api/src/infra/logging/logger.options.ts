@@ -16,6 +16,14 @@ export const REDACTED_PATHS = [
   '*.password',
   '*.secret',
   '*.token',
+  'cpf',
+  'vin',
+  'plate',
+  'renavam',
+  '*.cpf',
+  '*.vin',
+  '*.plate',
+  '*.renavam',
 ];
 
 export function buildLoggerOptions(): Params {
