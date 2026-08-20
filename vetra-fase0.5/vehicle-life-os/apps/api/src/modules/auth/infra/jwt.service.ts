@@ -1,7 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, type KeyObject } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { SignJWT, decodeProtectedHeader, importPKCS8, importSPKI, jwtVerify } from 'jose';
-import type { CryptoKey, KeyObject } from 'jose';
 import { getEnv } from '../../../config/env.js';
 import {
   type JwtKey,
