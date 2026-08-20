@@ -83,10 +83,6 @@ jobs:
             echo "Aguardando PostgreSQL..."
             sleep 1
           done
-          until redis-cli -h localhost -p 6379 ping; do
-            echo "Aguardando Redis..."
-            sleep 1
-          done
 
       - name: Criar roles no banco
         run: |
