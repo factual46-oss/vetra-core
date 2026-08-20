@@ -3,14 +3,23 @@ import { Injectable, Logger } from '@nestjs/common';
 import { SignJWT, decodeProtectedHeader, importPKCS8, importSPKI, jwtVerify } from 'jose';
 import type { KeyLike } from 'jose';
 import { getEnv } from '../../../config/env.js';
-import * as keysetModule from '../domain/jwt-keyset.js';
-import type { JwtKey } from '../domain/jwt-keyset.js';
+import {
+  type JwtKey,
+  type JwtKeySet,
+  parseKeySet,
+  resolveVerificationKey,
+  selectSigningKey,
+} from '../domain/jwt-keyset.js';
 
 export class InvalidTokenError extends Error {
   readonly kind: 'BAD_ALGORITHM' | 'UNKNOWN_KID' | 'MISSING_KID' | 'EXPIRED' | 'INVALID_SIGNATURE' | 'MALFORMED';
   readonly kid?: string;
 
-  constructor(kind: 'BAD_ALGORITHM' | 'UNKNOWN_KID' | 'MISSING_KID' | 'EXPIRED' | 'INVALID_SIGNATURE' | 'MALFORMED', message: string, kid?: string) {
+  constructor(
+    kind: 'BAD_ALGORITHM' | 'UNKNOWN_KID' | 'MISSING_KID' | 'EXPIRED' | 'INVALID_SIGNATURE' | 'MALFORMED',
+    message: string,
+    kid?: string,
+  ) {
     super(message);
     this.name = 'InvalidTokenError';
     this.kind = kind;
@@ -43,28 +52,35 @@ export interface SignTokenParams {
 @Injectable()
 export class JwtService {
   private readonly logger = new Logger(JwtService.name);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private keyset: any;
+  private keyset: JwtKeySet | null = null;
   private signingKeyCache: { key: JwtKey; parsed: KeyLike | Uint8Array } | null = null;
   private readonly verificationKeyCache = new Map<string, KeyLike | Uint8Array>();
 
   constructor() {
-    this.ensureKeyset();
+    this.loadKeyset();
   }
 
-  private ensureKeyset(): any {
+  private loadKeyset(): JwtKeySet | null {
     if (this.keyset) return this.keyset;
     try {
       const env = getEnv() as unknown as { JWT_KEYS_JSON?: string; JWT_KEY_SET_JSON?: string };
-      const rawJson = env.JWT_KEYS_JSON ?? env.JWT_KEY_SET_JSON ?? process.env.JWT_KEYS_JSON ?? process.env.JWT_KEY_SET_JSON ?? '[]';
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const parseFn = (keysetModule as any).parseKeySet;
-      this.keyset = parseFn(rawJson);
-      return this.keyset;
-    } catch (e) {
-      this.logger.error('Erro ao carregar keyset JWT', e);
-      throw e;
+      const rawJson = env.JWT_KEYS_JSON ?? env.JWT_KEY_SET_JSON ?? process.env.JWT_KEYS_JSON ?? process.env.JWT_KEY_SET_JSON;
+      if (rawJson) {
+        this.keyset = parseKeySet(rawJson);
+        return this.keyset;
+      }
+    } catch {
+      // Ignora durante instanciação em testes unitários que mockam o serviço
     }
+    return null;
+  }
+
+  private ensureKeyset(): JwtKeySet {
+    const keyset = this.loadKeyset();
+    if (!keyset) {
+      throw new Error('JWT Keyset não configurado');
+    }
+    return keyset;
   }
 
   async sign(params: SignTokenParams): Promise<SignTokenResult> {
@@ -76,9 +92,7 @@ export class JwtService {
     }
 
     const keyset = this.ensureKeyset();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const selectFn = (keysetModule as any).selectSigningKey;
-    const signingKey = selectFn(keyset);
+    const signingKey = selectSigningKey(keyset);
     const parsedKey = await this.resolvePrivateKey(signingKey);
     const jti = randomUUID();
     const expiresInSeconds = 600;
@@ -119,9 +133,7 @@ export class JwtService {
     }
 
     const keyset = this.ensureKeyset();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const resolveFn = (keysetModule as any).resolveVerificationKey;
-    const matchingKey = resolveFn(keyset, header.kid);
+    const matchingKey = resolveVerificationKey(keyset, header.kid);
     if (!matchingKey) {
       throw new InvalidTokenError('UNKNOWN_KID', `Unknown or expired key id: ${header.kid}`, header.kid);
     }
