@@ -3,12 +3,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { SignJWT, decodeProtectedHeader, importPKCS8, importSPKI, jwtVerify } from 'jose';
 import type { KeyLike } from 'jose';
 import { getEnv } from '../../../config/env.js';
-import {
-  type JwtKey,
-  parseKeySet,
-  resolveVerificationKey,
-  selectSigningKey,
-} from '../domain/jwt-keyset.js';
+import * as keysetModule from '../domain/jwt-keyset.js';
+import type { JwtKey } from '../domain/jwt-keyset.js';
 
 export class InvalidTokenError extends Error {
   readonly kind: string;
@@ -47,9 +43,18 @@ export interface SignTokenParams {
 @Injectable()
 export class JwtService {
   private readonly logger = new Logger(JwtService.name);
-  private readonly keyset = parseKeySet(getEnv().JWT_KEYS_JSON);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly keyset: any;
   private signingKeyCache: { key: JwtKey; parsed: KeyLike | Uint8Array } | null = null;
   private readonly verificationKeyCache = new Map<string, KeyLike | Uint8Array>();
+
+  constructor() {
+    const env = getEnv() as unknown as { JWT_KEYS_JSON?: string; JWT_KEY_SET_JSON?: string };
+    const rawJson = env.JWT_KEYS_JSON ?? env.JWT_KEY_SET_JSON ?? '[]';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parseFn = (keysetModule as any).parseKeySet;
+    this.keyset = parseFn(rawJson, new Date());
+  }
 
   async sign(params: SignTokenParams): Promise<SignTokenResult> {
     const sub = params.userId ?? params.sub;
@@ -59,7 +64,9 @@ export class JwtService {
       throw new Error('sub and sid are required to sign an access token');
     }
 
-    const signingKey = selectSigningKey(this.keyset, new Date());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const selectFn = (keysetModule as any).selectSigningKey;
+    const signingKey = selectFn(this.keyset, new Date());
     const parsedKey = await this.resolvePrivateKey(signingKey);
     const jti = randomUUID();
     const expiresInSeconds = 600;
@@ -90,7 +97,9 @@ export class JwtService {
         throw new InvalidTokenError('missing_kid', 'Token missing kid header');
       }
 
-      const matchingKey = resolveVerificationKey(this.keyset, header.kid, new Date());
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const resolveFn = (keysetModule as any).resolveVerificationKey;
+      const matchingKey = resolveFn(this.keyset, header.kid, new Date());
       if (!matchingKey) {
         throw new InvalidTokenError('unknown_kid', `Unknown or expired key id: ${header.kid}`, header.kid);
       }
@@ -124,7 +133,7 @@ export class JwtService {
     if (this.signingKeyCache?.key.kid === key.kid) {
       return this.signingKeyCache.parsed;
     }
-    const pem = key.privatePem;
+    const pem = (key as unknown as { privatePem?: string; private_key_pem?: string }).privatePem ?? (key as unknown as { private_key_pem?: string }).private_key_pem;
     if (!pem) {
       throw new Error(`Chave privada ausente para kid=${key.kid}`);
     }
@@ -137,7 +146,7 @@ export class JwtService {
     const cached = this.verificationKeyCache.get(key.kid);
     if (cached) return cached;
 
-    const pem = key.publicPem;
+    const pem = (key as unknown as { publicPem?: string; public_key_pem?: string }).publicPem ?? (key as unknown as { public_key_pem?: string }).public_key_pem;
     if (!pem) {
       throw new Error(`Chave pública ausente para kid=${key.kid}`);
     }
