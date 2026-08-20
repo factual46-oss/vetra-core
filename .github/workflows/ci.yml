@@ -44,7 +44,7 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: vlos_migrator
+          POSTGRES_USER: postgres
           POSTGRES_PASSWORD: vetra_password
           POSTGRES_DB: vetra_test
         ports:
@@ -79,7 +79,7 @@ jobs:
 
       - name: Aguardar serviços
         run: |
-          until pg_isready -h 127.0.0.1 -p 5432 -U vlos_migrator; do
+          until pg_isready -h 127.0.0.1 -p 5432 -U postgres; do
             echo "Aguardando PostgreSQL..."
             sleep 1
           done
@@ -88,17 +88,14 @@ jobs:
         env:
           PGHOST: 127.0.0.1
           PGPORT: 5432
-          PGUSER: vlos_migrator
+          PGUSER: postgres
           PGPASSWORD: vetra_password
-          POSTGRES_USER: vlos_migrator
-          POSTGRES_PASSWORD: vetra_password
-          POSTGRES_DB: vetra_test
           MIGRATOR_DB_PASSWORD: vetra_password
           APP_DB_PASSWORD: vetra_password
           AUTH_DB_PASSWORD: vetra_password
         run: |
           chmod +x db/init/01-roles.sh
-          DATABASE_URL="postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test" ./db/init/01-roles.sh
+          DATABASE_URL="postgres://postgres:vetra_password@127.0.0.1:5432/vetra_test" ./db/init/01-roles.sh
 
       - name: Executar Migrations
         env:
