@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { SignJWT, importPKCS8 } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Client } from 'pg';
@@ -100,7 +100,11 @@ describe('confusao de autorizacao', () => {
   }
 
   async function forge(payload: Record<string, unknown>, kid = 'test-active', pem = activeKeyPem) {
-    return new SignJWT(payload)
+    // FIX-1A-03: tokens forjados precisam do mesmo conjunto de claims que o
+    // emissor real produz. Sem `jti`, a validacao recusa com BAD_CLAIMS antes de
+    // chegar na verificacao que o teste quer exercitar -- o teste passava a
+    // provar a coisa errada, ou falhava sem relacao com o ataque simulado.
+    return new SignJWT({ jti: randomUUID(), ...payload })
       .setProtectedHeader({ alg: 'EdDSA', kid })
       .setIssuer('vetra')
       .setAudience('vetra-api')
