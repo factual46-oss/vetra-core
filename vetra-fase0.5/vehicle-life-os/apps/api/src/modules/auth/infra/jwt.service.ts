@@ -99,6 +99,8 @@ export class JwtService {
   }
 
   async verify(token: string): Promise<AccessTokenClaims> {
+    const env = getEnv();
+
     let header: { alg?: string; kid?: string };
     try {
       header = decodeProtectedHeader(token);
@@ -114,7 +116,7 @@ export class JwtService {
       throw new InvalidTokenError('UNKNOWN_KID', typeof header.kid === 'string' ? header.kid : undefined);
     }
 
-    // Pré-validação direta de expiração pelo payload antes de validar claims
+    // Pré-validação de expiração estrita
     try {
       const unverified = decodeJwt(token);
       if (unverified.exp && unverified.exp * 1000 < Date.now()) {
@@ -127,6 +129,8 @@ export class JwtService {
     try {
       const { payload } = await jwtVerify(token, await this.publicKeyFor(key), {
         algorithms: [ALG],
+        issuer: env.JWT_ISSUER,
+        audience: env.JWT_AUDIENCE,
       });
 
       const sid = (payload['sid'] ?? payload['sessionId']) as string | undefined;
@@ -149,8 +153,8 @@ export class JwtService {
         sessionId: sid,
         jti: typeof payload.jti === 'string' ? payload.jti : '',
         amr,
-        iss: String(payload.iss ?? ''),
-        aud: String(payload.aud ?? ''),
+        iss: String(payload.iss ?? env.JWT_ISSUER),
+        aud: String(payload.aud ?? env.JWT_AUDIENCE),
         iat: Number(payload.iat ?? 0),
         exp: Number(payload.exp ?? 0),
       };
