@@ -107,9 +107,10 @@ jobs:
         run: |
           npm run db:migrate
           PGPASSWORD=vetra_password psql -h 127.0.0.1 -U postgres -d vetra_test -c "
-            REVOKE UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA audit FROM vlos_app;
-            REVOKE UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA audit FROM vlos_auth;
-            REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA audit FROM vlos_app;
+            REVOKE ALL ON SCHEMA audit FROM PUBLIC, vlos_app, vlos_auth;
+            GRANT USAGE ON SCHEMA audit TO vlos_app, vlos_auth;
+            REVOKE UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA audit FROM PUBLIC, vlos_app, vlos_auth;
+            GRANT INSERT, SELECT ON ALL TABLES IN SCHEMA audit TO vlos_app, vlos_auth;
           " || true
 
       - name: Executar Seed
