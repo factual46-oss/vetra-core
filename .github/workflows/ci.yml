@@ -111,6 +111,16 @@ jobs:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test
         run: npm run db:seed
 
+      - name: Executar Migrations
+        env:
+          DATABASE_URL: postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test
+        run: npm run db:migrate
+
+      - name: Executar Seed
+        env:
+          DATABASE_URL: postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test
+        run: npm run db:seed
+
       - name: Testes de Integração e Segurança
         env:
           NODE_ENV: test
