@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { SignJWT, decodeProtectedHeader, importPKCS8, importSPKI, jwtVerify } from 'jose';
-import type { CryptoKey, KeyObject } from 'jose';
+import type { KeyLike } from 'jose';
 import { getEnv } from '../../../config/env.js';
 import {
   type JwtKey,
@@ -39,22 +39,12 @@ export class InvalidTokenError extends Error {
 
 const ALG = 'EdDSA';
 
-/**
- * Access token: JWT compacto, EdDSA (Ed25519), TTL curto, claims minimas.
- *
- * `algorithms: ['EdDSA']` na verificacao nao e detalhe: sem a lista explicita, um
- * token forjado com `alg: HS256` usando a CHAVE PUBLICA como segredo HMAC seria
- * aceito. E o ataque de confusao de algoritmo, e ha teste para ele.
- *
- * Nenhuma claim de autorizacao entra aqui. `admin_permission` e sempre consultada
- * no banco, sob RLS, a cada uso (item 24 do escopo).
- */
 @Injectable()
 export class JwtService {
   private readonly logger = new Logger(JwtService.name);
   private readonly keys: JwtKey[];
-  private readonly privateKeys = new Map<string, CryptoKey | KeyObject>();
-  private readonly publicKeys = new Map<string, CryptoKey | KeyObject>();
+  private readonly privateKeys = new Map<string, KeyLike | Uint8Array>();
+  private readonly publicKeys = new Map<string, KeyLike | Uint8Array>();
 
   constructor() {
     const env = getEnv();
@@ -67,7 +57,7 @@ export class JwtService {
     this.keys = parseKeySet(raw, env.NODE_ENV === 'production');
   }
 
-  private async privateKeyFor(key: JwtKey): Promise<CryptoKey | KeyObject> {
+  private async privateKeyFor(key: JwtKey): Promise<KeyLike | Uint8Array> {
     const cached = this.privateKeys.get(key.kid);
     if (cached) return cached;
     const imported = await importPKCS8(key.privatePem, ALG);
@@ -75,7 +65,7 @@ export class JwtService {
     return imported;
   }
 
-  private async publicKeyFor(key: JwtKey): Promise<CryptoKey | KeyObject> {
+  private async publicKeyFor(key: JwtKey): Promise<KeyLike | Uint8Array> {
     const cached = this.publicKeys.get(key.kid);
     if (cached) return cached;
     const imported = await importSPKI(key.publicPem, ALG);
@@ -118,8 +108,6 @@ export class JwtService {
 
     const key = resolveVerificationKey(this.keys, header.kid);
     if (!key) {
-      // kid nao e segredo: registrar ajuda a distinguir chave retirada cedo
-      // demais de token forjado. A resposta ao cliente permanece generica.
       this.logger.warn({ kid: header.kid }, 'token com kid desconhecido');
       throw new InvalidTokenError('UNKNOWN_KID', typeof header.kid === 'string' ? header.kid : undefined);
     }
@@ -147,11 +135,16 @@ export class JwtService {
         iat: Number(payload.iat),
         exp: Number(payload.exp),
       };
-    } catch (err) {
+    } catch (err: unknown) {
       if (err instanceof InvalidTokenError) throw err;
-      const code = (err as { code?: string }).code;
-      if (code === 'ERR_JWT_EXPIRED') throw new InvalidTokenError('EXPIRED');
-      if (code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') throw new InvalidTokenError('BAD_CLAIMS');
+      const code = (err as { code?: string })?.code;
+      const name = (err as { name?: string })?.name;
+      if (code === 'ERR_JWT_EXPIRED' || name === 'JWTExpired') {
+        throw new InvalidTokenError('EXPIRED');
+      }
+      if (code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
+        throw new InvalidTokenError('BAD_CLAIMS');
+      }
       throw new InvalidTokenError('BAD_SIGNATURE');
     }
   }
