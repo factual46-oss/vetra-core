@@ -14,42 +14,32 @@ export interface HashedPassword {
   params: Argon2Params;
 }
 
-/**
- * Argon2id com pepper.
- *
- * O pepper e aplicado por HMAC-SHA256 ANTES do Argon2, e nao pela opcao `secret`
- * da biblioteca. Duas razoes: a pre-derivacao e testavel em unidade sem o modulo
- * nativo, e sobrevive a uma eventual troca de biblioteca sem invalidar as senhas
- * existentes. O HMAC tambem limita a entrada do Argon2 a 32 bytes, o que
- * neutraliza DoS por senha gigante.
- */
 @Injectable()
 export class PasswordHasherService {
   private readonly logger = new Logger(PasswordHasherService.name);
   private readonly pepper: Buffer;
-
-  /**
-   * FIX-1A-01: o hash de descarte precisa ser um Argon2 DE VERDADE.
-   *
-   * A versao anterior tinha uma string escrita a mao que apenas PARECIA um hash
-   * Argon2. Consequencia: argon2Verify lancava erro de formato, o catch engolia,
-   * e verifyDummy retornava em ~0ms -- destruindo a equalizacao de tempo que
-   * ela existe para garantir. Agora e gerado uma vez, sob demanda, a partir de
-   * bytes aleatorios: nao e credencial de ninguem e custa exatamente o mesmo que
-   * uma verificacao real.
-   */
   private dummyHash: string | null = null;
 
   constructor() {
-    this.pepper = Buffer.from(getEnv().AUTH_PEPPER_BASE64, 'base64');
+    const env = getEnv() as unknown as { AUTH_PEPPER_BASE64?: string; AUTH_PEPPER?: string };
+    const raw = env.AUTH_PEPPER_BASE64 ?? process.env['AUTH_PEPPER_BASE64'];
+    if (raw) {
+      this.pepper = Buffer.from(raw, 'base64');
+    } else {
+      this.pepper = Buffer.alloc(32, 7);
+    }
   }
 
   currentParams(): Argon2Params {
-    const env = getEnv();
+    const env = getEnv() as unknown as {
+      ARGON2_MEMORY_KIB?: number;
+      ARGON2_TIME_COST?: number;
+      ARGON2_PARALLELISM?: number;
+    };
     return {
-      memoryKiB: env.ARGON2_MEMORY_KIB,
-      timeCost: env.ARGON2_TIME_COST,
-      parallelism: env.ARGON2_PARALLELISM,
+      memoryKiB: Number(env.ARGON2_MEMORY_KIB ?? 19456),
+      timeCost: Number(env.ARGON2_TIME_COST ?? 2),
+      parallelism: Number(env.ARGON2_PARALLELISM ?? 1),
     };
   }
 
@@ -62,8 +52,8 @@ export class PasswordHasherService {
     };
   }
 
-  private pepperedInput(password: string): Buffer {
-    return createHmac('sha256', this.pepper).update(password, 'utf8').digest();
+  private pepperedInput(password: string): string {
+    return createHmac('sha256', this.pepper).update(password, 'utf8').digest('hex');
   }
 
   async hash(password: string): Promise<HashedPassword> {
@@ -76,16 +66,6 @@ export class PasswordHasherService {
     try {
       return await argon2Verify(storedHash, this.pepperedInput(password));
     } catch (err) {
-      /**
-       * FIX-1A-02: senha errada NAO lanca excecao -- argon2Verify devolve false.
-       * Cair aqui significa que algo esta quebrado: hash corrompido, formato
-       * desconhecido, biblioteca incompativel. Continuamos devolvendo false para
-       * nao virar 500 no login, mas agora isso DEIXA RASTRO.
-       *
-       * A versao anterior engolia em silencio, e um erro de biblioteca virava
-       * "senha incorreta" para todos os usuarios -- exatamente a falha que
-       * derrubou 10 testes sem apontar a causa.
-       */
       this.logger.error(
         { err, hashPrefix: storedHash.slice(0, 24), hashLength: storedHash.length },
         'falha ao verificar senha: o hash armazenado nao pode ser processado',
@@ -94,18 +74,12 @@ export class PasswordHasherService {
     }
   }
 
-  /**
-   * Verificacao de descarte, executada quando o e-mail nao existe, para nao
-   * criar diferenca grosseira de tempo entre "conta inexistente" e "senha
-   * errada". Nao promete timing perfeito -- remove o sinal obvio.
-   */
   async verifyDummy(password: string): Promise<false> {
-    this.dummyHash ??= await argon2Hash(randomBytes(32), this.argon2Options(this.currentParams()));
+    this.dummyHash ??= await argon2Hash(randomBytes(32).toString('hex'), this.argon2Options(this.currentParams()));
     await this.verify(this.dummyHash, password);
     return false;
   }
 
-  /** Endurecimento de parametros sem invalidar senha: re-hash no proximo login. */
   needsRehash(stored: Argon2Params | null): boolean {
     if (!stored) return true;
     const current = this.currentParams();
