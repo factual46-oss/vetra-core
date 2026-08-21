@@ -116,7 +116,6 @@ export class JwtService {
       throw new InvalidTokenError('UNKNOWN_KID', typeof header.kid === 'string' ? header.kid : undefined);
     }
 
-    // Validação explícita de expiração antes da verificação criptográfica
     try {
       const unverified = decodeJwt(token);
       if (typeof unverified.exp === 'number' && unverified.exp * 1000 < Date.now()) {
@@ -129,15 +128,9 @@ export class JwtService {
     try {
       const { payload } = await jwtVerify(token, await this.publicKeyFor(key), {
         algorithms: [ALG],
+        issuer: env.JWT_ISSUER,
+        audience: env.JWT_AUDIENCE,
       });
-
-      // Validação estrita de emissor e audiência quando presentes na assinatura original
-      if (payload.iss && payload.iss !== env.JWT_ISSUER) {
-        throw new InvalidTokenError('BAD_CLAIMS');
-      }
-      if (payload.aud && payload.aud !== env.JWT_AUDIENCE) {
-        throw new InvalidTokenError('BAD_CLAIMS');
-      }
 
       const sid = (payload['sid'] ?? payload['sessionId']) as string | undefined;
       const sub = payload.sub;
@@ -147,11 +140,12 @@ export class JwtService {
       }
 
       const rawAmr = payload['amr'];
-      const amr = Array.isArray(rawAmr)
-        ? rawAmr.map(String)
-        : typeof rawAmr === 'string'
-          ? [rawAmr]
-          : ['pwd'];
+      let amr: string[] = ['pwd'];
+      if (Array.isArray(rawAmr)) {
+        amr = rawAmr.map(String);
+      } else if (typeof rawAmr === 'string') {
+        amr = [rawAmr];
+      }
 
       return {
         ...payload,
