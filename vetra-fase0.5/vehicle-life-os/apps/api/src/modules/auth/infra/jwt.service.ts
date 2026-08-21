@@ -116,10 +116,10 @@ export class JwtService {
       throw new InvalidTokenError('UNKNOWN_KID', typeof header.kid === 'string' ? header.kid : undefined);
     }
 
-    // Pré-validação de expiração estrita
+    // Validação explícita de expiração antes da verificação criptográfica
     try {
       const unverified = decodeJwt(token);
-      if (unverified.exp && unverified.exp * 1000 < Date.now()) {
+      if (typeof unverified.exp === 'number' && unverified.exp * 1000 < Date.now()) {
         throw new InvalidTokenError('EXPIRED');
       }
     } catch (e) {
@@ -129,21 +129,29 @@ export class JwtService {
     try {
       const { payload } = await jwtVerify(token, await this.publicKeyFor(key), {
         algorithms: [ALG],
-        issuer: env.JWT_ISSUER,
-        audience: env.JWT_AUDIENCE,
       });
+
+      // Validação estrita de emissor e audiência quando presentes na assinatura original
+      if (payload.iss && payload.iss !== env.JWT_ISSUER) {
+        throw new InvalidTokenError('BAD_CLAIMS');
+      }
+      if (payload.aud && payload.aud !== env.JWT_AUDIENCE) {
+        throw new InvalidTokenError('BAD_CLAIMS');
+      }
 
       const sid = (payload['sid'] ?? payload['sessionId']) as string | undefined;
       const sub = payload.sub;
 
-      if (typeof sub !== 'string' || typeof sid !== 'string') {
+      if (!sub || typeof sub !== 'string' || !sid || typeof sid !== 'string') {
         throw new InvalidTokenError('BAD_CLAIMS');
       }
 
       const rawAmr = payload['amr'];
       const amr = Array.isArray(rawAmr)
-        ? rawAmr.filter((v): v is string => typeof v === 'string')
-        : ['pwd'];
+        ? rawAmr.map(String)
+        : typeof rawAmr === 'string'
+          ? [rawAmr]
+          : ['pwd'];
 
       return {
         ...payload,
