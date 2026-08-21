@@ -46,10 +46,6 @@ export class AuthController {
     private readonly db: DatabaseService,
   ) {}
 
-  /**
-   * 202 sempre, tenha o e-mail sido cadastrado ou nao (item 9).
-   * A conclusao do fluxo depende da verificacao de e-mail (Fase 1B).
-   */
   @Post('register')
   @HttpCode(HttpStatus.ACCEPTED)
   @UsePipes(new ZodValidationPipe(registerSchema))
@@ -163,10 +159,6 @@ export class AuthController {
     return { revokedSessions: revoked };
   }
 
-  /**
-   * Prova a cadeia inteira: token -> AuthContext -> withUserContext -> RLS.
-   * A consulta nao filtra por id; quem filtra e a policy.
-   */
   @Get('me')
   @UseGuards(AuthGuard)
   async me(@Req() req: AuthenticatedRequest): Promise<Record<string, unknown>> {
@@ -233,7 +225,6 @@ function setAuthCookies(
     ...base,
     maxAge: env.REFRESH_TOKEN_TTL_DAYS * 86_400,
   });
-  // Legivel pelo JavaScript de proposito: e o par do double-submit.
   reply.setCookie(CSRF_COOKIE, randomBytes(24).toString('base64url'), {
     ...base,
     httpOnly: false,
