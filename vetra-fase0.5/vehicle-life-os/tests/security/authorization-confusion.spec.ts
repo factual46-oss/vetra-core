@@ -99,16 +99,38 @@ describe('confusao de autorizacao', () => {
     return { userId: claims.sub, sessionId: claims.sid };
   }
 
-  async function forge(payload: Record<string, unknown>, kid = 'test-active', pem = activeKeyPem) {
-    // FIX-1A-03: tokens forjados precisam do mesmo conjunto de claims que o
-    // emissor real produz. Sem `jti`, a validacao recusa com BAD_CLAIMS antes de
-    // chegar na verificacao que o teste quer exercitar -- o teste passava a
-    // provar a coisa errada, ou falhava sem relacao com o ataque simulado.
-    return new SignJWT({ ...payload })
+  /**
+   * FIX-1A-04: o token forjado nasce de um token REAL.
+   *
+   * As tres tentativas anteriores montaram o token a mao e falharam sempre pelo
+   * mesmo motivo estrutural: faltava alguma claim que a verificacao exige (jti,
+   * typ, iss, aud...), e o teste era recusado com BAD_CLAIMS ANTES de exercitar
+   * o ataque que ele existe para provar. Cada rodada descobria mais um campo.
+   *
+   * Agora partimos de um token legitimamente emitido pelo servico e sobrescrevemos
+   * apenas o que o ataque altera. O teste deixa de depender de eu adivinhar o
+   * formato -- se a verificacao passar a exigir uma claim nova, o token forjado
+   * ganha essa claim sozinho.
+   *
+   * Passar `undefined` num campo REMOVE a claim (usado no caso 12).
+   */
+  async function forge(overrides: Record<string, unknown>, kid = 'test-active', pem = activeKeyPem) {
+    const real = await jwt.sign({ userId: userA, sessionId: sessionA, amr: ['pwd'] });
+    const base = JSON.parse(Buffer.from(real.token.split('.')[1]!, 'base64url').toString()) as Record<
+      string,
+      unknown
+    >;
+    delete base['iat'];
+    delete base['exp'];
+
+    const claims: Record<string, unknown> = { ...base };
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === undefined) delete claims[key];
+      else claims[key] = value;
+    }
+
+    return new SignJWT(claims)
       .setProtectedHeader({ alg: 'EdDSA', kid, typ: 'JWT' })
-      .setJti(randomUUID())
-      .setIssuer('vetra')
-      .setAudience('vetra-api')
       .setIssuedAt()
       .setExpirationTime('10m')
       .sign(await importPKCS8(pem, 'EdDSA'));
@@ -125,7 +147,7 @@ describe('confusao de autorizacao', () => {
 
   it('2. sub trocado e reassinado com chave estranha e recusado', async () => {
     const foreign = generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-    const forged = await forge({ sub: userB, sid: sessionB, amr: ['pwd'] }, 'test-active', foreign);
+    const forged = await forge({ sub: userB, sid: sessionB }, 'test-active', foreign);
     await expect(authenticate(forged)).rejects.toBeTruthy();
   });
 
@@ -211,7 +233,7 @@ describe('confusao de autorizacao', () => {
   });
 
   it('12. token sem sid e recusado', async () => {
-    const forged = await forge({ sub: userA, amr: ['pwd'] });
+    const forged = await forge({ sid: undefined });
     await expect(authenticate(forged)).rejects.toBeTruthy();
   });
 });
