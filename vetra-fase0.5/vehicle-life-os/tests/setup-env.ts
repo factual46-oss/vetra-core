@@ -1,42 +1,49 @@
-const validTestKeySet = [
-  {
-    kid: 'test-active',
-    status: 'active',
-    use: 'sig',
-    created_at: '2026-01-01T00:00:00.000Z',
-    public_key_pem: '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAPm1zV1Z6e9U07FvK4a0h8R+x8UjRkZ+m3l7m/QZ+M0Q=\n-----END PUBLIC KEY-----',
-    private_key_pem: '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIP4N1rZzZqI7QpX6qM3q5w4j7GZ6+9t6d5F0j8X4uWq7\n-----END PRIVATE KEY-----',
-    publicPem: '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAPm1zV1Z6e9U07FvK4a0h8R+x8UjRkZ+m3l7m/QZ+M0Q=\n-----END PUBLIC KEY-----',
-    privatePem: '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIP4N1rZzZqI7QpX6qM3q5w4j7GZ6+9t6d5F0j8X4uWq7\n-----END PRIVATE KEY-----',
-  },
-  {
-    kid: 'vetra-key-2026-01',
-    status: 'active',
-    use: 'sig',
-    created_at: '2026-01-01T00:00:00.000Z',
-    public_key_pem: '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAPm1zV1Z6e9U07FvK4a0h8R+x8UjRkZ+m3l7m/QZ+M0Q=\n-----END PUBLIC KEY-----',
-    private_key_pem: '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIP4N1rZzZqI7QpX6qM3q5w4j7GZ6+9t6d5F0j8X4uWq7\n-----END PRIVATE KEY-----',
-    publicPem: '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAPm1zV1Z6e9U07FvK4a0h8R+x8UjRkZ+m3l7m/QZ+M0Q=\n-----END PUBLIC KEY-----',
-    privatePem: '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIP4N1rZzZqI7QpX6qM3q5w4j7GZ6+9t6d5F0j8X4uWq7\n-----END PRIVATE KEY-----',
-  },
-];
+import { generateKeyPairSync } from 'node:crypto';
 
-const keyJson = JSON.stringify(validTestKeySet);
+/**
+ * Preenche o ambiente das suites ANTES de qualquer import de servico --
+ * getEnv() e memoizado e os servicos leem a configuracao no construtor.
+ *
+ * As URLs de banco vem das variaveis TEST_*. Se elas faltarem, as suites da
+ * Fase 1 FALHAM em vez de pular: SKIP nao e PASS.
+ */
+process.env['NODE_ENV'] ??= 'test';
 
-process.env.NODE_ENV = 'test';
-process.env.API_PORT = '3000';
-process.env.LOG_LEVEL = 'fatal';
-process.env.DATABASE_URL = 'postgres://vlos_app:vetra_password@127.0.0.1:5432/vetra_test';
-process.env.DATABASE_AUTH_URL = 'postgres://vlos_auth:vetra_password@127.0.0.1:5432/vetra_test';
-process.env.DATABASE_MIGRATOR_URL = 'postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test';
-process.env.TEST_DATABASE_URL_MIGRATOR = 'postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test';
-process.env.TEST_DATABASE_URL_APP = 'postgres://vlos_app:vetra_password@127.0.0.1:5432/vetra_test';
-process.env.TEST_DATABASE_URL_AUTH = 'postgres://vlos_auth:vetra_password@127.0.0.1:5432/vetra_test';
-process.env.REDIS_URL = 'redis://127.0.0.1:6379';
-process.env.KEK_SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-process.env.AUTH_PEPPER = 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
-process.env.COOKIE_SECRET = 'vetra_cookie_secret_dev_key_32bytes';
-process.env.CORS_ORIGINS = 'http://localhost:3000';
-process.env.TRUSTED_PROXIES = '127.0.0.1';
-process.env.JWT_KEYS_JSON = keyJson;
-process.env.JWT_KEY_SET_JSON = keyJson;
+/**
+ * As URLs reais vem das variaveis TEST_*. Os valores de reserva existem apenas
+ * para que getEnv() valide -- suites puras (dominio, JWT) constroem servicos
+ * sem nunca abrir conexao. Suite que precisa de banco de verdade chama
+ * requireDatabase() e FALHA com mensagem clara se as TEST_* faltarem.
+ */
+process.env['DATABASE_URL'] ??=
+  process.env['TEST_DATABASE_URL_APP'] ?? 'postgres://vlos_app:sem-banco@127.0.0.1:5432/vlos';
+process.env['DATABASE_AUTH_URL'] ??=
+  process.env['TEST_DATABASE_URL_AUTH'] ?? 'postgres://vlos_auth:sem-banco@127.0.0.1:5432/vlos';
+process.env['REDIS_URL'] ??= 'redis://localhost:6379';
+
+process.env['AUTH_PEPPER_BASE64'] ??= Buffer.alloc(32, 7).toString('base64');
+process.env['APP_KEK_BASE64'] ??= Buffer.alloc(32, 8).toString('base64');
+process.env['IDENTIFIER_PEPPER_BASE64'] ??= Buffer.alloc(32, 9).toString('base64');
+process.env['AUDIT_IP_HASH_KEY_BASE64'] ??= Buffer.alloc(32, 10).toString('base64');
+
+// Argon2 com o minimo OWASP: a suite roda dezenas de hashes e o custo importa.
+process.env['ARGON2_MEMORY_KIB'] ??= '19456';
+process.env['ARGON2_TIME_COST'] ??= '2';
+process.env['ARGON2_PARALLELISM'] ??= '1';
+
+if (!process.env['JWT_KEYS_JSON'] || process.env['JWT_KEYS_JSON'] === '[]') {
+  process.env['JWT_KEYS_JSON'] = JSON.stringify([
+    makeKey('test-active', 'active'),
+    makeKey('test-retiring', 'retiring'),
+  ]);
+}
+
+function makeKey(kid: string, status: 'active' | 'next' | 'retiring') {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  return {
+    kid,
+    status,
+    privatePem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    publicPem: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+  };
+}
