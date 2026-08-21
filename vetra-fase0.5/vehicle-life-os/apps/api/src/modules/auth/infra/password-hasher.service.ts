@@ -1,5 +1,5 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { Injectable, Logger } from '@nestjs/common';
 import { hash as argon2Hash, verify as argon2Verify, Algorithm } from '@node-rs/argon2';
 import { getEnv } from '../../../config/env.js';
 
@@ -20,19 +20,28 @@ export interface HashedPassword {
  * O pepper e aplicado por HMAC-SHA256 ANTES do Argon2, e nao pela opcao `secret`
  * da biblioteca. Duas razoes: a pre-derivacao e testavel em unidade sem o modulo
  * nativo, e sobrevive a uma eventual troca de biblioteca sem invalidar as senhas
- * existentes -- o formato do hash deixa de depender de um recurso especifico do
- * fornecedor.
- *
- * O HMAC tambem limita a entrada do Argon2 a 32 bytes, o que neutraliza qualquer
- * tentativa de DoS por senha gigante.
+ * existentes. O HMAC tambem limita a entrada do Argon2 a 32 bytes, o que
+ * neutraliza DoS por senha gigante.
  */
 @Injectable()
 export class PasswordHasherService {
+  private readonly logger = new Logger(PasswordHasherService.name);
   private readonly pepper: Buffer;
 
+  /**
+   * FIX-1A-01: o hash de descarte precisa ser um Argon2 DE VERDADE.
+   *
+   * A versao anterior tinha uma string escrita a mao que apenas PARECIA um hash
+   * Argon2. Consequencia: argon2Verify lancava erro de formato, o catch engolia,
+   * e verifyDummy retornava em ~0ms -- destruindo a equalizacao de tempo que
+   * ela existe para garantir. Agora e gerado uma vez, sob demanda, a partir de
+   * bytes aleatorios: nao e credencial de ninguem e custa exatamente o mesmo que
+   * uma verificacao real.
+   */
+  private dummyHash: string | null = null;
+
   constructor() {
-    const env = getEnv();
-    this.pepper = Buffer.from(env.AUTH_PEPPER_BASE64, 'base64');
+    this.pepper = Buffer.from(getEnv().AUTH_PEPPER_BASE64, 'base64');
   }
 
   currentParams(): Argon2Params {
@@ -44,28 +53,43 @@ export class PasswordHasherService {
     };
   }
 
+  private argon2Options(params: Argon2Params) {
+    return {
+      algorithm: Algorithm.Argon2id,
+      memoryCost: params.memoryKiB,
+      timeCost: params.timeCost,
+      parallelism: params.parallelism,
+    };
+  }
+
   private pepperedInput(password: string): Buffer {
-    // Sem pepper configurado (desenvolvimento), o HMAC roda com chave vazia:
-    // o formato do hash e o mesmo, e ligar o pepper depois exige re-hash.
     return createHmac('sha256', this.pepper).update(password, 'utf8').digest();
   }
 
   async hash(password: string): Promise<HashedPassword> {
     const params = this.currentParams();
-    const hashed = await argon2Hash(this.pepperedInput(password), {
-      algorithm: Algorithm.Argon2id,
-      memoryCost: params.memoryKiB,
-      timeCost: params.timeCost,
-      parallelism: params.parallelism,
-    });
+    const hashed = await argon2Hash(this.pepperedInput(password), this.argon2Options(params));
     return { hash: hashed, params };
   }
 
   async verify(storedHash: string, password: string): Promise<boolean> {
     try {
       return await argon2Verify(storedHash, this.pepperedInput(password));
-    } catch {
-      // Hash corrompido ou formato desconhecido nao deve virar 500 no login.
+    } catch (err) {
+      /**
+       * FIX-1A-02: senha errada NAO lanca excecao -- argon2Verify devolve false.
+       * Cair aqui significa que algo esta quebrado: hash corrompido, formato
+       * desconhecido, biblioteca incompativel. Continuamos devolvendo false para
+       * nao virar 500 no login, mas agora isso DEIXA RASTRO.
+       *
+       * A versao anterior engolia em silencio, e um erro de biblioteca virava
+       * "senha incorreta" para todos os usuarios -- exatamente a falha que
+       * derrubou 10 testes sem apontar a causa.
+       */
+      this.logger.error(
+        { err, hashPrefix: storedHash.slice(0, 24), hashLength: storedHash.length },
+        'falha ao verificar senha: o hash armazenado nao pode ser processado',
+      );
       return false;
     }
   }
@@ -73,10 +97,11 @@ export class PasswordHasherService {
   /**
    * Verificacao de descarte, executada quando o e-mail nao existe, para nao
    * criar diferenca grosseira de tempo entre "conta inexistente" e "senha
-   * errada". Nao promete timing perfeito -- reduz o sinal obvio.
+   * errada". Nao promete timing perfeito -- remove o sinal obvio.
    */
   async verifyDummy(password: string): Promise<false> {
-    await this.verify(DUMMY_HASH, password);
+    this.dummyHash ??= await argon2Hash(randomBytes(32), this.argon2Options(this.currentParams()));
+    await this.verify(this.dummyHash, password);
     return false;
   }
 
@@ -95,11 +120,3 @@ export class PasswordHasherService {
     return a.length === b.length && timingSafeEqual(a, b);
   }
 }
-
-/**
- * Hash fixo de descarte. Nao e credencial de ninguem: e o hash de um valor
- * aleatorio gerado uma vez, mantido constante para que a verificacao falsa
- * custe o mesmo que a verdadeira.
- */
-const DUMMY_HASH =
-  '$argon2id$v=19$m=19456,t=3,p=1$c29tZXNhbHRzb21lc2FsdA$YXJnb24yaWRkdW1teWhhc2hmb3J0aW1pbmc';
