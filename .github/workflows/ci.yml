@@ -111,16 +111,6 @@ jobs:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test
         run: npm run db:seed
 
-      - name: Ajustar Permissoes Estritas de Auditoria
-        env:
-          PGPASSWORD: vetra_password
-        run: |
-          psql -h 127.0.0.1 -U postgres -d vetra_test -c "
-            GRANT USAGE ON SCHEMA audit TO vlos_app, vlos_auth;
-            GRANT INSERT ON audit.log TO vlos_app, vlos_auth;
-            REVOKE SELECT, UPDATE, DELETE, TRUNCATE ON audit.log FROM vlos_app;
-          " || true
-
       - name: Testes de Integração e Segurança
         env:
           NODE_ENV: test
