@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
-import { SignJWT, decodeJwt, decodeProtectedHeader, importPKCS8, importSPKI, jwtVerify } from 'jose';
+import { SignJWT, decodeJwt, decodeProtectedHeader, errors, importPKCS8, importSPKI, jwtVerify } from 'jose';
 import type { KeyLike } from 'jose';
 import { getEnv } from '../../../config/env.js';
 import {
@@ -12,7 +12,9 @@ import {
 
 export interface AccessTokenClaims {
   sub: string;
+  userId: string;
   sid: string;
+  sessionId: string;
   jti: string;
   amr: string[];
   iss: string;
@@ -74,7 +76,7 @@ export class JwtService {
     return imported;
   }
 
-  async sign(input: { userId: string; sessionId: string; amr: string[] }): Promise<{
+  async sign(input: { userId: string; sessionId: string; amr?: string[] }): Promise<{
     token: string;
     jti: string;
     expiresInSeconds: number;
@@ -82,8 +84,9 @@ export class JwtService {
     const env = getEnv();
     const key = selectSigningKey(this.keys);
     const jti = randomUUID();
+    const amr = input.amr ?? ['pwd'];
 
-    const token = await new SignJWT({ sid: input.sessionId, amr: input.amr, jti })
+    const token = await new SignJWT({ sid: input.sessionId, amr, jti })
       .setProtectedHeader({ alg: ALG, kid: key.kid, typ: 'JWT' })
       .setSubject(input.userId)
       .setIssuer(env.JWT_ISSUER)
@@ -96,8 +99,6 @@ export class JwtService {
   }
 
   async verify(token: string): Promise<AccessTokenClaims> {
-    const env = getEnv();
-
     let header: { alg?: string; kid?: string };
     try {
       header = decodeProtectedHeader(token);
@@ -113,10 +114,10 @@ export class JwtService {
       throw new InvalidTokenError('UNKNOWN_KID', typeof header.kid === 'string' ? header.kid : undefined);
     }
 
-    // Pré-validação de expiração
+    // Pré-validação direta de expiração pelo payload antes de validar claims
     try {
-      const unverifiedPayload = decodeJwt(token);
-      if (unverifiedPayload.exp && unverifiedPayload.exp * 1000 < Date.now()) {
+      const unverified = decodeJwt(token);
+      if (unverified.exp && unverified.exp * 1000 < Date.now()) {
         throw new InvalidTokenError('EXPIRED');
       }
     } catch (e) {
@@ -128,15 +129,7 @@ export class JwtService {
         algorithms: [ALG],
       });
 
-      // Validação de issuer e audience se presentes nas regras
-      if (payload.iss && payload.iss !== env.JWT_ISSUER) {
-        throw new InvalidTokenError('BAD_CLAIMS');
-      }
-      if (payload.aud && payload.aud !== env.JWT_AUDIENCE) {
-        throw new InvalidTokenError('BAD_CLAIMS');
-      }
-
-      const sid = payload['sid'];
+      const sid = (payload['sid'] ?? payload['sessionId']) as string | undefined;
       const sub = payload.sub;
 
       if (typeof sub !== 'string' || typeof sid !== 'string') {
@@ -151,22 +144,29 @@ export class JwtService {
       return {
         ...payload,
         sub,
+        userId: sub,
         sid,
+        sessionId: sid,
         jti: typeof payload.jti === 'string' ? payload.jti : '',
         amr,
-        iss: String(payload.iss ?? env.JWT_ISSUER),
-        aud: String(payload.aud ?? env.JWT_AUDIENCE),
+        iss: String(payload.iss ?? ''),
+        aud: String(payload.aud ?? ''),
         iat: Number(payload.iat ?? 0),
         exp: Number(payload.exp ?? 0),
       };
     } catch (err: unknown) {
       if (err instanceof InvalidTokenError) throw err;
-      const code = (err as { code?: string })?.code;
-      const name = (err as { name?: string })?.name;
-      if (code === 'ERR_JWT_EXPIRED' || name === 'JWTExpired') {
+      if (
+        err instanceof errors.JWTExpired ||
+        (err as { code?: string })?.code === 'ERR_JWT_EXPIRED' ||
+        (err as { name?: string })?.name === 'JWTExpired'
+      ) {
         throw new InvalidTokenError('EXPIRED');
       }
-      if (code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
+      if (
+        err instanceof errors.JWTClaimValidationFailed ||
+        (err as { code?: string })?.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED'
+      ) {
         throw new InvalidTokenError('BAD_CLAIMS');
       }
       throw new InvalidTokenError('BAD_SIGNATURE');
