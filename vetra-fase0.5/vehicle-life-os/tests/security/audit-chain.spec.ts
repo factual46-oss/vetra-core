@@ -49,9 +49,19 @@ describe.skipIf(!HAS_DB)('cadeia de hash do log auditavel', () => {
     expect(result.rows).toEqual([]);
   });
 
-  it('UPDATE e DELETE sao anulados pelas RULEs, inclusive para a dona da tabela', async () => {
-    await db.query(`UPDATE audit.log SET action = 'ADULTERADO' WHERE id = $1`, [firstId]);
-    await db.query(`DELETE FROM audit.log WHERE id = $1`, [firstId]);
+  it('UPDATE e DELETE sao RECUSADOS, inclusive para a dona da tabela', async () => {
+    // Mudanca declarada (0011 / FIX-3): antes o append-only era feito por RULE
+    // DO INSTEAD NOTHING, que silenciava a operacao. O rewriter descartava a
+    // query antes da checagem de privilegio, entao uma tentativa de adulteracao
+    // recebia "ok". Agora um trigger recusa explicitamente: a linha continua
+    // intacta E a tentativa vira erro registravel.
+    const update = await expectRejection(() =>
+      db.query(`UPDATE audit.log SET action = 'ADULTERADO' WHERE id = $1`, [firstId]),
+    );
+    expect(update.message).toMatch(/append-only|permission denied|permissão negada/i);
+
+    const remove = await expectRejection(() => db.query(`DELETE FROM audit.log WHERE id = $1`, [firstId]));
+    expect(remove.message).toMatch(/append-only|permission denied|permissão negada/i);
 
     const check = await db.query<{ action: string }>(`SELECT action FROM audit.log WHERE id = $1`, [firstId]);
     expect(check.rowCount).toBe(1);
@@ -59,7 +69,7 @@ describe.skipIf(!HAS_DB)('cadeia de hash do log auditavel', () => {
   });
 
   it('adulteracao com privilegio de dono e detectada pela verificacao', async () => {
-    await db.query(`ALTER TABLE audit.log DISABLE RULE audit_log_no_update`);
+    await db.query(`ALTER TABLE audit.log DISABLE TRIGGER audit_log_immutable`);
     try {
       await db.query(`UPDATE audit.log SET metadata = '{"n":"adulterado"}'::jsonb WHERE id = $1`, [firstId]);
 
@@ -68,7 +78,7 @@ describe.skipIf(!HAS_DB)('cadeia de hash do log auditavel', () => {
       expect(Number(broken.rows[0]!.broken_at)).toBe(firstId);
     } finally {
       await db.query(`UPDATE audit.log SET metadata = '{"n":1}'::jsonb WHERE id = $1`, [firstId]);
-      await db.query(`ALTER TABLE audit.log ENABLE RULE audit_log_no_update`);
+      await db.query(`ALTER TABLE audit.log ENABLE TRIGGER audit_log_immutable`);
     }
 
     const healed = await db.query(`SELECT * FROM audit.verify_chain()`);
