@@ -101,7 +101,6 @@ jobs:
           chmod +x db/init/01-roles.sh
           ./db/init/01-roles.sh
 
-
       - name: Executar Migrations
         env:
           DATABASE_URL: postgres://vlos_migrator:vetra_password@127.0.0.1:5432/vetra_test
