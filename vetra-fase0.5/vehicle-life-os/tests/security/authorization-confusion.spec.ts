@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT, importPKCS8 } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Client } from 'pg';
