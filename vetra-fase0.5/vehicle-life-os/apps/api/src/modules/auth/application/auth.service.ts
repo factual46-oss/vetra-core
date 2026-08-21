@@ -33,10 +33,24 @@ export interface IssuedCredentials {
   sessionId: string;
 }
 
-export class AuthenticationError extends Error {
+export class InvalidCredentialsError extends Error {
   constructor(message = 'credenciais invalidas') {
     super(message);
-    this.name = 'AuthenticationError';
+    this.name = 'InvalidCredentialsError';
+  }
+}
+
+export class WeakPasswordError extends Error {
+  constructor(message = 'senha fraca') {
+    super(message);
+    this.name = 'WeakPasswordError';
+  }
+}
+
+export class InvalidEmailError extends Error {
+  constructor(message = 'email invalido') {
+    super(message);
+    this.name = 'InvalidEmailError';
   }
 }
 
@@ -67,18 +81,28 @@ export class AuthService {
   ) {}
 
   async register(input: RegisterInput): Promise<{ userId: string }> {
+    const normEmail = input.email.trim().toLowerCase();
+
+    if (!normEmail || !normEmail.includes('@') || normEmail.startsWith('@') || normEmail.endsWith('@')) {
+      throw new InvalidEmailError();
+    }
+
+    if (!input.password || input.password.length < 8) {
+      throw new WeakPasswordError();
+    }
+
     await this.rateLimit.consume(
       [
         { key: `rl:reg:ip:${input.signals.ip ?? 'unknown'}`, limit: 10, windowSeconds: 3600 },
-        { key: `rl:reg:email:${input.email.toLowerCase()}`, limit: 3, windowSeconds: 3600 },
+        { key: `rl:reg:email:${normEmail}`, limit: 3, windowSeconds: 3600 },
       ],
       'FAIL_CLOSED',
     );
 
-    const exists = await this.credentials.existsByEmail(input.email);
-    if (exists) {
+    const lookup = await this.credentials.lookupByEmail(normEmail);
+    if (lookup) {
       await this.audit.record({
-        action: 'AUTH_REGISTER_REJECTED_EMAIL_EXISTS',
+        action: 'AUTH_REGISTER_REJECTED',
         reason: 'email ja cadastrado',
         ip: input.signals.ip,
         requestId: input.signals.requestId,
@@ -87,26 +111,26 @@ export class AuthService {
     }
 
     const passwordHash = await this.hasher.hash(input.password);
-    const user = await this.credentials.createWithPassword({
-      email: input.email,
+    const userId = await this.credentials.create({
+      email: normEmail,
       displayName: input.displayName,
       passwordHash,
     });
 
     await this.audit.record({
-      action: 'AUTH_USER_REGISTERED',
-      actorUserId: user.id,
+      action: 'AUTH_REGISTERED',
+      actorUserId: userId,
       objectType: 'user',
-      objectId: user.id,
+      objectId: userId,
       ip: input.signals.ip,
       requestId: input.signals.requestId,
     });
 
-    return { userId: user.id };
+    return { userId };
   }
 
   async login(input: LoginInput): Promise<IssuedCredentials> {
-    const normEmail = input.email.toLowerCase();
+    const normEmail = input.email.trim().toLowerCase();
     await this.rateLimit.consume(
       [
         { key: `rl:login:ip:${input.signals.ip ?? 'unknown'}`, limit: 30, windowSeconds: 300 },
@@ -115,7 +139,7 @@ export class AuthService {
       'FAIL_CLOSED',
     );
 
-    const cred = await this.credentials.findByEmailForAuth(normEmail);
+    const cred = await this.credentials.lookupByEmail(normEmail);
 
     let passwordMatches = false;
     if (cred && cred.passwordHash) {
@@ -132,30 +156,30 @@ export class AuthService {
         ip: input.signals.ip,
         requestId: input.signals.requestId,
       });
-      throw new AuthenticationError();
+      throw new InvalidCredentialsError();
     }
 
     const session = await this.sessions.create({
-      userId: cred.id,
+      userId: cred.userId,
       amr: ['pwd'],
       ip: input.signals.ip,
       userAgent: input.signals.userAgent,
     });
 
     const access = await this.jwt.sign({
-      userId: cred.id,
+      userId: cred.userId,
       sessionId: session.id,
       amr: ['pwd'],
     });
 
     const refresh = await this.refreshTokens.issue({
-      userId: cred.id,
+      userId: cred.userId,
       sessionId: session.id,
     });
 
     await this.audit.record({
-      action: 'AUTH_LOGIN_SUCCESS',
-      actorUserId: cred.id,
+      action: 'AUTH_LOGIN_SUCCEEDED',
+      actorUserId: cred.userId,
       objectType: 'session',
       objectId: session.id,
       ip: input.signals.ip,
@@ -179,6 +203,19 @@ export class AuthService {
       actorUserId: userId,
       objectType: 'session',
       objectId: sessionId,
+      ip: signals.ip,
+      requestId: signals.requestId,
+    });
+  }
+
+  async logoutAll(userId: string, signals: RequestSignals): Promise<void> {
+    await this.sessions.revokeAllForUser(userId, 'LOGOUT_ALL');
+
+    await this.audit.record({
+      action: 'AUTH_LOGOUT_ALL',
+      actorUserId: userId,
+      objectType: 'user',
+      objectId: userId,
       ip: signals.ip,
       requestId: signals.requestId,
     });
