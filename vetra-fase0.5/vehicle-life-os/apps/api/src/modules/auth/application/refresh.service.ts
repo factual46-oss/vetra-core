@@ -43,15 +43,17 @@ export class RefreshService {
       throw new InvalidRefreshTokenError(false);
     }
 
-    const outcome = await this.refreshTokens.consume(input.rawToken);
+    // Consumo, verificacao da sessao e emissao do proximo token acontecem numa
+    // unica transacao (FIX-1A-05). Auditoria e assinatura do access token ficam
+    // FORA dela de proposito: sao operacoes que nao devem prender a linha do
+    // refresh token nem desfazer a rotacao se falharem.
+    const outcome = await this.refreshTokens.rotateAtomically(input.rawToken);
 
     if (outcome.status === 'REPLAY') {
-      // Politica estrita: a familia inteira morre, nao apenas o token reutilizado.
+      // Politica estrita: a familia inteira ja morreu dentro da transacao.
       // Consequencia de UX declarada no plano -- dois refresh legitimos em
       // paralelo derrubam a sessao. Preferimos isso a manter viva uma cadeia
       // possivelmente comprometida.
-      await this.refreshTokens.revokeFamily(outcome.familyId, 'REPLAY_DETECTED');
-      await this.sessions.revoke(outcome.sessionId, 'REPLAY_DETECTED');
       await this.audit.record({
         action: 'AUTH_REFRESH_REPLAY_DETECTED',
         actorUserId: outcome.userId,
@@ -65,6 +67,17 @@ export class RefreshService {
       throw new InvalidRefreshTokenError(true);
     }
 
+    if (outcome.status === 'SESSION_INACTIVE') {
+      await this.audit.record({
+        action: 'AUTH_REFRESH_REJECTED',
+        actorUserId: outcome.userId,
+        reason: 'sessao revogada ou expirada',
+        ip: input.signals.ip,
+        requestId: input.signals.requestId,
+      });
+      throw new InvalidRefreshTokenError(false);
+    }
+
     if (outcome.status === 'INVALID') {
       await this.audit.record({
         action: 'AUTH_REFRESH_REJECTED',
@@ -75,36 +88,11 @@ export class RefreshService {
       throw new InvalidRefreshTokenError(false);
     }
 
-    // Token consumido com sucesso -- a sessao ainda precisa estar viva.
-    const sessionAlive = await this.db.query(
-      `SELECT 1 FROM identity.session
-        WHERE id = $1 AND revoked_at IS NULL AND expires_at > now()`,
-      [outcome.sessionId],
-    );
-
-    if (sessionAlive.rowCount !== 1) {
-      await this.refreshTokens.revokeFamily(outcome.familyId, 'SESSION_INACTIVE');
-      await this.audit.record({
-        action: 'AUTH_REFRESH_REJECTED',
-        actorUserId: outcome.userId,
-        reason: 'sessao revogada ou expirada',
-        ip: input.signals.ip,
-      });
-      throw new InvalidRefreshTokenError(false);
-    }
-
-    const next = await this.refreshTokens.issue({
-      sessionId: outcome.sessionId,
-      userId: outcome.userId,
-      familyId: outcome.familyId,
-      previousId: outcome.tokenId,
-    });
     const access = await this.jwt.sign({
       userId: outcome.userId,
       sessionId: outcome.sessionId,
       amr: ['pwd'],
     });
-    await this.sessions.touch(outcome.sessionId);
 
     await this.audit.record({
       action: 'AUTH_REFRESH_ROTATED',
@@ -118,7 +106,7 @@ export class RefreshService {
     return {
       accessToken: access.token,
       expiresInSeconds: access.expiresInSeconds,
-      refreshToken: next.raw,
+      refreshToken: outcome.token.raw,
       sessionId: outcome.sessionId,
     };
   }
