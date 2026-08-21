@@ -120,20 +120,24 @@ export class JwtService {
       });
 
       const sid = payload['sid'];
-      const amr = payload['amr'];
-      if (typeof payload.sub !== 'string' || typeof sid !== 'string' || !Array.isArray(amr)) {
+      if (typeof payload.sub !== 'string' || typeof sid !== 'string') {
         throw new InvalidTokenError('BAD_CLAIMS');
       }
+
+      const rawAmr = payload['amr'];
+      const amr = Array.isArray(rawAmr)
+        ? rawAmr.filter((v): v is string => typeof v === 'string')
+        : ['pwd'];
 
       return {
         sub: payload.sub,
         sid,
         jti: typeof payload.jti === 'string' ? payload.jti : '',
-        amr: amr.filter((v): v is string => typeof v === 'string'),
+        amr,
         iss: String(payload.iss),
         aud: String(payload.aud),
-        iat: Number(payload.iat),
-        exp: Number(payload.exp),
+        iat: Number(payload.iat ?? 0),
+        exp: Number(payload.exp ?? 0),
       };
     } catch (err: unknown) {
       if (err instanceof InvalidTokenError) throw err;
