@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
-import { SignJWT, decodeProtectedHeader, importPKCS8, importSPKI, jwtVerify } from 'jose';
+import { SignJWT, decodeProtectedHeader, errors, importPKCS8, importSPKI, jwtVerify } from 'jose';
 import type { KeyLike } from 'jose';
 import { getEnv } from '../../../config/env.js';
 import {
@@ -120,7 +120,9 @@ export class JwtService {
       });
 
       const sid = payload['sid'];
-      if (typeof payload.sub !== 'string' || typeof sid !== 'string') {
+      const sub = payload.sub;
+
+      if (typeof sub !== 'string' || typeof sid !== 'string') {
         throw new InvalidTokenError('BAD_CLAIMS');
       }
 
@@ -130,7 +132,7 @@ export class JwtService {
         : ['pwd'];
 
       return {
-        sub: payload.sub,
+        sub,
         sid,
         jti: typeof payload.jti === 'string' ? payload.jti : '',
         amr,
@@ -141,12 +143,10 @@ export class JwtService {
       };
     } catch (err: unknown) {
       if (err instanceof InvalidTokenError) throw err;
-      const code = (err as { code?: string })?.code;
-      const name = (err as { name?: string })?.name;
-      if (code === 'ERR_JWT_EXPIRED' || name === 'JWTExpired') {
+      if (err instanceof errors.JWTExpired || (err as { code?: string })?.code === 'ERR_JWT_EXPIRED' || (err as { name?: string })?.name === 'JWTExpired') {
         throw new InvalidTokenError('EXPIRED');
       }
-      if (code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
+      if (err instanceof errors.JWTClaimValidationFailed || (err as { code?: string })?.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
         throw new InvalidTokenError('BAD_CLAIMS');
       }
       throw new InvalidTokenError('BAD_SIGNATURE');
