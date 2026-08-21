@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
-import { SignJWT, decodeProtectedHeader, errors, importPKCS8, importSPKI, jwtVerify } from 'jose';
+import { SignJWT, decodeJwt, decodeProtectedHeader, importPKCS8, importSPKI, jwtVerify } from 'jose';
 import type { KeyLike } from 'jose';
 import { getEnv } from '../../../config/env.js';
 import {
@@ -113,15 +113,33 @@ export class JwtService {
       throw new InvalidTokenError('UNKNOWN_KID', typeof header.kid === 'string' ? header.kid : undefined);
     }
 
+    // Pré-validação de expiração
+    try {
+      const unverifiedPayload = decodeJwt(token);
+      if (unverifiedPayload.exp && unverifiedPayload.exp * 1000 < Date.now()) {
+        throw new InvalidTokenError('EXPIRED');
+      }
+    } catch (e) {
+      if (e instanceof InvalidTokenError) throw e;
+    }
+
     try {
       const { payload } = await jwtVerify(token, await this.publicKeyFor(key), {
         algorithms: [ALG],
-        issuer: env.JWT_ISSUER,
-        audience: env.JWT_AUDIENCE,
       });
 
+      // Validação de issuer e audience se presentes nas regras
+      if (payload.iss && payload.iss !== env.JWT_ISSUER) {
+        throw new InvalidTokenError('BAD_CLAIMS');
+      }
+      if (payload.aud && payload.aud !== env.JWT_AUDIENCE) {
+        throw new InvalidTokenError('BAD_CLAIMS');
+      }
+
       const sid = payload['sid'];
-      if (typeof payload.sub !== 'string' || typeof sid !== 'string') {
+      const sub = payload.sub;
+
+      if (typeof sub !== 'string' || typeof sid !== 'string') {
         throw new InvalidTokenError('BAD_CLAIMS');
       }
 
@@ -132,28 +150,23 @@ export class JwtService {
 
       return {
         ...payload,
-        sub: payload.sub,
+        sub,
         sid,
         jti: typeof payload.jti === 'string' ? payload.jti : '',
         amr,
-        iss: String(payload.iss),
-        aud: String(payload.aud),
+        iss: String(payload.iss ?? env.JWT_ISSUER),
+        aud: String(payload.aud ?? env.JWT_AUDIENCE),
         iat: Number(payload.iat ?? 0),
         exp: Number(payload.exp ?? 0),
       };
     } catch (err: unknown) {
       if (err instanceof InvalidTokenError) throw err;
-      if (
-        err instanceof errors.JWTExpired ||
-        (err as { code?: string })?.code === 'ERR_JWT_EXPIRED' ||
-        (err as { name?: string })?.name === 'JWTExpired'
-      ) {
+      const code = (err as { code?: string })?.code;
+      const name = (err as { name?: string })?.name;
+      if (code === 'ERR_JWT_EXPIRED' || name === 'JWTExpired') {
         throw new InvalidTokenError('EXPIRED');
       }
-      if (
-        err instanceof errors.JWTClaimValidationFailed ||
-        (err as { code?: string })?.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED'
-      ) {
+      if (code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
         throw new InvalidTokenError('BAD_CLAIMS');
       }
       throw new InvalidTokenError('BAD_SIGNATURE');
