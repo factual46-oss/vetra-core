@@ -19,6 +19,7 @@ export interface AccessTokenClaims {
   aud: string;
   iat: number;
   exp: number;
+  [key: string]: unknown;
 }
 
 export class InvalidTokenError extends Error {
@@ -120,9 +121,7 @@ export class JwtService {
       });
 
       const sid = payload['sid'];
-      const sub = payload.sub;
-
-      if (typeof sub !== 'string' || typeof sid !== 'string') {
+      if (typeof payload.sub !== 'string' || typeof sid !== 'string') {
         throw new InvalidTokenError('BAD_CLAIMS');
       }
 
@@ -132,7 +131,8 @@ export class JwtService {
         : ['pwd'];
 
       return {
-        sub,
+        ...payload,
+        sub: payload.sub,
         sid,
         jti: typeof payload.jti === 'string' ? payload.jti : '',
         amr,
@@ -143,10 +143,17 @@ export class JwtService {
       };
     } catch (err: unknown) {
       if (err instanceof InvalidTokenError) throw err;
-      if (err instanceof errors.JWTExpired || (err as { code?: string })?.code === 'ERR_JWT_EXPIRED' || (err as { name?: string })?.name === 'JWTExpired') {
+      if (
+        err instanceof errors.JWTExpired ||
+        (err as { code?: string })?.code === 'ERR_JWT_EXPIRED' ||
+        (err as { name?: string })?.name === 'JWTExpired'
+      ) {
         throw new InvalidTokenError('EXPIRED');
       }
-      if (err instanceof errors.JWTClaimValidationFailed || (err as { code?: string })?.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
+      if (
+        err instanceof errors.JWTClaimValidationFailed ||
+        (err as { code?: string })?.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED'
+      ) {
         throw new InvalidTokenError('BAD_CLAIMS');
       }
       throw new InvalidTokenError('BAD_SIGNATURE');
