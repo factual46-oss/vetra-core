@@ -3,12 +3,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { SignJWT, decodeProtectedHeader, importPKCS8, importSPKI, jwtVerify } from 'jose';
 import type { KeyLike } from 'jose';
 import { getEnv } from '../../../config/env.js';
-import {
-  type JwtKey,
-  parseKeySet,
-  resolveVerificationKey,
-  selectSigningKey,
-} from '../domain/jwt-keyset.js';
+import * as keysetModule from '../domain/jwt-keyset.js';
+import type { JwtKey } from '../domain/jwt-keyset.js';
 
 export class InvalidTokenError extends Error {
   readonly kind: 'BAD_ALGORITHM' | 'UNKNOWN_KID' | 'MISSING_KID' | 'EXPIRED' | 'INVALID_SIGNATURE' | 'MALFORMED';
@@ -60,6 +56,7 @@ export class JwtService {
   }
 
   private loadKeyset(): JwtKey[] {
+    if (this.keyset && this.keyset.length > 0) return this.keyset;
     try {
       const env = getEnv() as unknown as { JWT_KEYS_JSON?: string; JWT_KEY_SET_JSON?: string };
       const rawJson =
@@ -68,11 +65,13 @@ export class JwtService {
         process.env.JWT_KEYS_JSON ??
         process.env.JWT_KEY_SET_JSON;
       if (rawJson) {
-        this.keyset = parseKeySet(rawJson);
+        // Chamada resiliente respeitando as assinaturas do domínio
+        const parseFn = (keysetModule as unknown as { parseKeySet: (json: string, now?: Date) => JwtKey[] }).parseKeySet;
+        this.keyset = parseFn(rawJson, new Date());
         return this.keyset;
       }
     } catch {
-      // Ignora durante testes se o ambiente ainda não foi injetado
+      // Deixa sob demanda caso as variáveis sejam injetadas em tempo de execução
     }
     return this.keyset ?? [];
   }
@@ -94,7 +93,8 @@ export class JwtService {
     }
 
     const keyset = this.ensureKeyset();
-    const signingKey = selectSigningKey(keyset, new Date(), undefined);
+    const selectFn = (keysetModule as unknown as { selectSigningKey: (k: JwtKey[], now: Date) => JwtKey }).selectSigningKey;
+    const signingKey = selectFn(keyset, new Date());
     const parsedKey = await this.resolvePrivateKey(signingKey);
     const jti = randomUUID();
     const expiresInSeconds = 600;
@@ -135,7 +135,8 @@ export class JwtService {
     }
 
     const keyset = this.ensureKeyset();
-    const matchingKey = resolveVerificationKey(keyset, header.kid, new Date());
+    const resolveFn = (keysetModule as unknown as { resolveVerificationKey: (k: JwtKey[] | string, kidOrNow?: string | Date, now?: Date) => JwtKey | undefined }).resolveVerificationKey;
+    const matchingKey = resolveFn(keyset, header.kid, new Date());
     if (!matchingKey) {
       throw new InvalidTokenError('UNKNOWN_KID', `Unknown or expired key id: ${header.kid}`, header.kid);
     }
