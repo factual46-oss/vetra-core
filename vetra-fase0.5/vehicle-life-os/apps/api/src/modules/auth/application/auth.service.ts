@@ -1,29 +1,32 @@
 import { Injectable } from '@nestjs/common';
+import { InvalidEmailError, normalizeEmail } from '../domain/email.js';
+import { checkPassword } from '../domain/password-policy.js';
 import { AuthAuditService } from '../infra/auth-audit.service.js';
-import { CredentialRepository } from '../infra/credential.repository.js';
-import { JwtService } from '../infra/jwt.service.js';
+import { CredentialRepository, EmailAlreadyRegisteredError } from '../infra/credential.repository.js';
 import { PasswordHasherService } from '../infra/password-hasher.service.js';
-import { RateLimitService } from '../infra/rate-limit.service.js';
 import { RefreshTokenRepository } from '../infra/refresh-token.repository.js';
 import { SessionRepository } from '../infra/session.repository.js';
+import { JwtService } from '../infra/jwt.service.js';
+import { RateLimitService } from '../infra/rate-limit.service.js';
+
+export class InvalidCredentialsError extends Error {
+  constructor() {
+    super('credenciais invalidas');
+    this.name = 'InvalidCredentialsError';
+  }
+}
+
+export class WeakPasswordError extends Error {
+  constructor(readonly rejection: string) {
+    super('senha nao atende a politica');
+    this.name = 'WeakPasswordError';
+  }
+}
 
 export interface RequestSignals {
-  ip?: string;
-  userAgent?: string;
-  requestId?: string;
-}
-
-export interface RegisterInput {
-  email: string;
-  password: string;
-  displayName: string;
-  signals: RequestSignals;
-}
-
-export interface LoginInput {
-  email: string;
-  password: string;
-  signals: RequestSignals;
+  ip?: string | undefined;
+  userAgent?: string | undefined;
+  requestId?: string | undefined;
 }
 
 export interface IssuedCredentials {
@@ -31,41 +34,6 @@ export interface IssuedCredentials {
   expiresInSeconds: number;
   refreshToken: string;
   sessionId: string;
-}
-
-export class InvalidCredentialsError extends Error {
-  constructor(message = 'credenciais invalidas') {
-    super(message);
-    this.name = 'InvalidCredentialsError';
-  }
-}
-
-export class WeakPasswordError extends Error {
-  constructor(message = 'senha fraca') {
-    super(message);
-    this.name = 'WeakPasswordError';
-  }
-}
-
-export class InvalidEmailError extends Error {
-  constructor(message = 'email invalido') {
-    super(message);
-    this.name = 'InvalidEmailError';
-  }
-}
-
-export class EmailAlreadyInUseError extends Error {
-  constructor() {
-    super('email ja cadastrado');
-    this.name = 'EmailAlreadyInUseError';
-  }
-}
-
-export class RateLimitExceededError extends Error {
-  constructor(readonly retryAfterSeconds: number) {
-    super('muitas tentativas, tente novamente mais tarde');
-    this.name = 'RateLimitExceededError';
-  }
 }
 
 @Injectable()
@@ -80,111 +48,153 @@ export class AuthService {
     private readonly audit: AuthAuditService,
   ) {}
 
-  async register(input: RegisterInput): Promise<{ userId: string }> {
-    const normEmail = input.email.trim().toLowerCase();
-
-    if (!normEmail || !normEmail.includes('@') || normEmail.startsWith('@') || normEmail.endsWith('@')) {
-      throw new InvalidEmailError();
-    }
-
-    if (!input.password || input.password.length < 8) {
-      throw new WeakPasswordError();
-    }
-
+  async register(input: {
+    email: string;
+    password: string;
+    displayName: string;
+    signals: RequestSignals;
+  }): Promise<void> {
     await this.rateLimit.consume(
-      [
-        { key: `rl:reg:ip:${input.signals.ip ?? 'unknown'}`, limit: 10, windowSeconds: 3600 },
-        { key: `rl:reg:email:${normEmail}`, limit: 3, windowSeconds: 3600 },
-      ],
+      [{ key: `rl:register:ip:${input.signals.ip ?? 'unknown'}`, limit: 5, windowSeconds: 3600 }],
       'FAIL_CLOSED',
     );
 
-    const lookup = await this.credentials.lookupByEmail(normEmail);
-    if (lookup) {
+    let email: string;
+    try {
+      email = normalizeEmail(input.email);
+    } catch (err) {
+      if (err instanceof InvalidEmailError) throw err;
+      throw err;
+    }
+
+    const check = checkPassword(input.password);
+    if (!check.ok) throw new WeakPasswordError(check.rejection ?? 'INVALID');
+
+    const hashed = await this.hasher.hash(input.password);
+
+    try {
+      const userId = await this.credentials.register({
+        email,
+        displayName: input.displayName.trim().slice(0, 120),
+        passwordHash: hashed.hash,
+        params: hashed.params,
+      });
       await this.audit.record({
-        action: 'AUTH_REGISTER_REJECTED',
-        reason: 'email ja cadastrado',
+        action: 'AUTH_REGISTERED',
+        actorUserId: userId,
+        objectType: 'user',
+        objectId: userId,
         ip: input.signals.ip,
         requestId: input.signals.requestId,
       });
-      throw new EmailAlreadyInUseError();
+    } catch (err) {
+      if (err instanceof EmailAlreadyRegisteredError) {
+        await this.audit.record({
+          action: 'AUTH_REGISTER_DUPLICATE',
+          ip: input.signals.ip,
+          requestId: input.signals.requestId,
+        });
+        return;
+      }
+      throw err;
     }
-
-    const passwordHash = await this.hasher.hash(input.password);
-    const userId = await this.credentials.create({
-      email: normEmail,
-      displayName: input.displayName,
-      passwordHash,
-    });
-
-    await this.audit.record({
-      action: 'AUTH_REGISTERED',
-      actorUserId: userId,
-      objectType: 'user',
-      objectId: userId,
-      ip: input.signals.ip,
-      requestId: input.signals.requestId,
-    });
-
-    return { userId };
   }
 
-  async login(input: LoginInput): Promise<IssuedCredentials> {
-    const normEmail = input.email.trim().toLowerCase();
-    await this.rateLimit.consume(
-      [
-        { key: `rl:login:ip:${input.signals.ip ?? 'unknown'}`, limit: 30, windowSeconds: 300 },
-        { key: `rl:login:email:${normEmail}`, limit: 5, windowSeconds: 300 },
-      ],
-      'FAIL_CLOSED',
-    );
+  async login(input: {
+    email: string;
+    password: string;
+    signals: RequestSignals;
+  }): Promise<IssuedCredentials> {
+    const emailKey = safeKey(input.email);
+    const rules = [
+      { key: `rl:login:email:${emailKey}`, limit: 5, windowSeconds: 900 },
+      { key: `rl:login:ip:${input.signals.ip ?? 'unknown'}`, limit: 20, windowSeconds: 900 },
+    ];
+    await this.rateLimit.consume(rules, 'FAIL_CLOSED');
 
-    const cred = await this.credentials.lookupByEmail(normEmail);
-
-    let passwordMatches = false;
-    if (cred && cred.passwordHash) {
-      passwordMatches = await this.hasher.verify(cred.passwordHash, input.password);
-    } else {
+    let email: string;
+    try {
+      email = normalizeEmail(input.email);
+    } catch {
       await this.hasher.verifyDummy(input.password);
+      throw new InvalidCredentialsError();
     }
 
-    if (!cred || !passwordMatches) {
+    const found = await this.credentials.lookup(email);
+
+    if (!found) {
+      await this.hasher.verifyDummy(input.password);
       await this.audit.record({
         action: 'AUTH_LOGIN_FAILED',
-        reason: 'credenciais invalidas',
-        metadata: { email: normEmail },
+        reason: 'UNKNOWN_ACCOUNT',
         ip: input.signals.ip,
         requestId: input.signals.requestId,
       });
       throw new InvalidCredentialsError();
     }
 
-    const session = await this.sessions.create({
-      userId: cred.userId,
-      amr: ['pwd'],
-      ip: input.signals.ip,
-      userAgent: input.signals.userAgent,
-    });
+    const passwordOk = await this.hasher.verify(found.passwordHash, input.password);
 
-    const access = await this.jwt.sign({
-      userId: cred.userId,
-      sessionId: session.id,
-      amr: ['pwd'],
-    });
+    if (!passwordOk) {
+      await this.audit.record({
+        action: 'AUTH_LOGIN_FAILED',
+        actorUserId: found.userId,
+        reason: 'BAD_PASSWORD',
+        ip: input.signals.ip,
+        requestId: input.signals.requestId,
+      });
+      throw new InvalidCredentialsError();
+    }
 
-    const refresh = await this.refreshTokens.issue({
-      userId: cred.userId,
-      sessionId: session.id,
-    });
+    if (found.isBlocked) {
+      await this.audit.record({
+        action: 'AUTH_LOGIN_BLOCKED_ACCOUNT',
+        actorUserId: found.userId,
+        ip: input.signals.ip,
+        requestId: input.signals.requestId,
+      });
+      throw new InvalidCredentialsError();
+    }
 
+    if (this.hasher.needsRehash(found.params)) {
+      const rehashed = await this.hasher.hash(input.password);
+      await this.credentials.setPassword({
+        userId: found.userId,
+        passwordHash: rehashed.hash,
+        params: rehashed.params,
+        rehashOnly: true,
+      });
+      await this.audit.record({ action: 'AUTH_PASSWORD_REHASHED', actorUserId: found.userId });
+    }
+
+    const issued = await this.issueSession(found.userId, ['pwd'], input.signals);
+
+    await this.rateLimit.reset(rules.map((r) => r.key));
     await this.audit.record({
       action: 'AUTH_LOGIN_SUCCEEDED',
-      actorUserId: cred.userId,
+      actorUserId: found.userId,
       objectType: 'session',
-      objectId: session.id,
+      objectId: issued.sessionId,
       ip: input.signals.ip,
       requestId: input.signals.requestId,
     });
+
+    return issued;
+  }
+
+  async issueSession(
+    userId: string,
+    amr: string[],
+    signals: RequestSignals,
+  ): Promise<IssuedCredentials> {
+    const session = await this.sessions.create({
+      userId,
+      amr,
+      ip: signals.ip,
+      userAgent: signals.userAgent,
+    });
+    const refresh = await this.refreshTokens.issue({ sessionId: session.id, userId });
+    const access = await this.jwt.sign({ userId, sessionId: session.id, amr });
 
     return {
       accessToken: access.token,
@@ -194,30 +204,36 @@ export class AuthService {
     };
   }
 
-  async logout(sessionId: string, userId: string, signals: RequestSignals): Promise<void> {
-    await this.sessions.revoke(sessionId, 'LOGOUT');
-    await this.refreshTokens.revokeSessionTokens(sessionId, 'LOGOUT');
-
+  async logout(input: { userId: string; sessionId: string; signals: RequestSignals }): Promise<void> {
+    await this.sessions.revoke(input.sessionId, 'LOGOUT');
+    await this.refreshTokens.revokeSessionTokens(input.sessionId, 'LOGOUT');
     await this.audit.record({
       action: 'AUTH_LOGOUT',
-      actorUserId: userId,
+      actorUserId: input.userId,
       objectType: 'session',
-      objectId: sessionId,
-      ip: signals.ip,
-      requestId: signals.requestId,
+      objectId: input.sessionId,
+      ip: input.signals.ip,
+      requestId: input.signals.requestId,
     });
   }
 
-  async logoutAll(userId: string, signals: RequestSignals): Promise<void> {
-    await this.sessions.revokeAllForUser(userId, 'LOGOUT_ALL');
-
+  async logoutAll(input: { userId: string; signals: RequestSignals }): Promise<number> {
+    const sessions = await this.sessions.listOwn(input.userId);
+    for (const session of sessions) {
+      await this.refreshTokens.revokeSessionTokens(session.id, 'LOGOUT_ALL');
+    }
+    const revoked = await this.sessions.revokeAllForUser(input.userId, 'LOGOUT_ALL');
     await this.audit.record({
       action: 'AUTH_LOGOUT_ALL',
-      actorUserId: userId,
-      objectType: 'user',
-      objectId: userId,
-      ip: signals.ip,
-      requestId: signals.requestId,
+      actorUserId: input.userId,
+      metadata: { revokedSessions: revoked },
+      ip: input.signals.ip,
+      requestId: input.signals.requestId,
     });
+    return revoked;
   }
+}
+
+function safeKey(email: string): string {
+  return Buffer.from(email.trim().toLowerCase(), 'utf8').toString('base64url').slice(0, 64);
 }
