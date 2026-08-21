@@ -1,22 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { SignJWT, decodeProtectedHeader, importPKCS8, importSPKI, jwtVerify } from 'jose';
-import type { KeyLike } from 'jose';
+import type { CryptoKey, KeyObject } from 'jose';
 import { getEnv } from '../../../config/env.js';
-import * as keysetModule from '../domain/jwt-keyset.js';
-import type { JwtKey } from '../domain/jwt-keyset.js';
-
-export class InvalidTokenError extends Error {
-  readonly kind: string;
-  readonly kid?: string;
-
-  constructor(kind: string, message: string, kid?: string) {
-    super(message);
-    this.name = 'InvalidTokenError';
-    this.kind = kind;
-    this.kid = kid;
-  }
-}
+import {
+  type JwtKey,
+  parseKeySet,
+  resolveVerificationKey,
+  selectSigningKey,
+} from '../domain/jwt-keyset.js';
 
 export interface AccessTokenClaims {
   sub: string;
@@ -25,151 +17,142 @@ export interface AccessTokenClaims {
   amr: string[];
   iss: string;
   aud: string;
+  iat: number;
+  exp: number;
 }
 
-export interface SignTokenResult {
-  token: string;
-  expiresInSeconds: number;
+export class InvalidTokenError extends Error {
+  constructor(
+    readonly kind:
+      | 'MALFORMED'
+      | 'UNKNOWN_KID'
+      | 'BAD_SIGNATURE'
+      | 'EXPIRED'
+      | 'BAD_CLAIMS'
+      | 'BAD_ALGORITHM',
+    readonly kid?: string,
+  ) {
+    super(kind);
+    this.name = 'InvalidTokenError';
+  }
 }
 
-export interface SignTokenParams {
-  userId?: string;
-  sessionId?: string;
-  sub?: string;
-  sid?: string;
-  amr?: string[];
-}
+const ALG = 'EdDSA';
 
+/**
+ * Access token: JWT compacto, EdDSA (Ed25519), TTL curto, claims minimas.
+ *
+ * `algorithms: ['EdDSA']` na verificacao nao e detalhe: sem a lista explicita, um
+ * token forjado com `alg: HS256` usando a CHAVE PUBLICA como segredo HMAC seria
+ * aceito. E o ataque de confusao de algoritmo, e ha teste para ele.
+ *
+ * Nenhuma claim de autorizacao entra aqui. `admin_permission` e sempre consultada
+ * no banco, sob RLS, a cada uso (item 24 do escopo).
+ */
 @Injectable()
 export class JwtService {
   private readonly logger = new Logger(JwtService.name);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private keyset: any;
-  private signingKeyCache: { key: JwtKey; parsed: KeyLike | Uint8Array } | null = null;
-  private readonly verificationKeyCache = new Map<string, KeyLike | Uint8Array>();
+  private readonly keys: JwtKey[];
+  private readonly privateKeys = new Map<string, CryptoKey | KeyObject>();
+  private readonly publicKeys = new Map<string, CryptoKey | KeyObject>();
 
   constructor() {
-    this.reloadKeyset();
-  }
-
-  reloadKeyset(): void {
+    const env = getEnv();
+    let raw: JwtKey[];
     try {
-      const env = getEnv() as unknown as { JWT_KEYS_JSON?: string; JWT_KEY_SET_JSON?: string };
-      const rawJson = env.JWT_KEYS_JSON ?? env.JWT_KEY_SET_JSON;
-      if (rawJson) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const parseFn = (keysetModule as any).parseKeySet;
-        this.keyset = parseFn(rawJson, new Date());
-      }
+      raw = JSON.parse(env.JWT_KEYS_JSON) as JwtKey[];
     } catch {
-      // Ignora falha de parse durante bootstrap de teste unitário isolado
+      throw new Error('JWT_KEYS_JSON nao e JSON valido');
     }
+    this.keys = parseKeySet(raw, env.NODE_ENV === 'production');
   }
 
-  async sign(params: SignTokenParams): Promise<SignTokenResult> {
-    const sub = params.userId ?? params.sub;
-    const sid = params.sessionId ?? params.sid;
+  private async privateKeyFor(key: JwtKey): Promise<CryptoKey | KeyObject> {
+    const cached = this.privateKeys.get(key.kid);
+    if (cached) return cached;
+    const imported = await importPKCS8(key.privatePem, ALG);
+    this.privateKeys.set(key.kid, imported);
+    return imported;
+  }
 
-    if (!sub || !sid) {
-      throw new Error('sub and sid are required to sign an access token');
-    }
+  private async publicKeyFor(key: JwtKey): Promise<CryptoKey | KeyObject> {
+    const cached = this.publicKeys.get(key.kid);
+    if (cached) return cached;
+    const imported = await importSPKI(key.publicPem, ALG);
+    this.publicKeys.set(key.kid, imported);
+    return imported;
+  }
 
-    if (!this.keyset) {
-      this.reloadKeyset();
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const selectFn = (keysetModule as any).selectSigningKey;
-    const signingKey = selectFn(this.keyset, new Date());
-    const parsedKey = await this.resolvePrivateKey(signingKey);
+  async sign(input: { userId: string; sessionId: string; amr: string[] }): Promise<{
+    token: string;
+    jti: string;
+    expiresInSeconds: number;
+  }> {
+    const env = getEnv();
+    const key = selectSigningKey(this.keys);
     const jti = randomUUID();
-    const expiresInSeconds = 600;
 
-    const token = await new SignJWT({
-      sid,
-      amr: params.amr ?? ['pwd'],
-    })
-      .setProtectedHeader({ alg: 'EdDSA', kid: signingKey.kid, typ: 'JWT' })
-      .setSubject(sub)
-      .setIssuer('urn:vetra:auth')
-      .setAudience('urn:vetra:api')
-      .setJti(jti)
+    const token = await new SignJWT({ sid: input.sessionId, amr: input.amr, jti })
+      .setProtectedHeader({ alg: ALG, kid: key.kid, typ: 'JWT' })
+      .setSubject(input.userId)
+      .setIssuer(env.JWT_ISSUER)
+      .setAudience(env.JWT_AUDIENCE)
       .setIssuedAt()
-      .setExpirationTime('10m')
-      .sign(parsedKey);
+      .setExpirationTime(`${env.ACCESS_TOKEN_TTL_SECONDS}s`)
+      .sign(await this.privateKeyFor(key));
 
-    return {
-      token,
-      expiresInSeconds,
-    };
+    return { token, jti, expiresInSeconds: env.ACCESS_TOKEN_TTL_SECONDS };
   }
 
   async verify(token: string): Promise<AccessTokenClaims> {
+    const env = getEnv();
+
+    let header: { alg?: string; kid?: string };
     try {
-      const header = decodeProtectedHeader(token);
-      if (!header.kid) {
-        throw new InvalidTokenError('missing_kid', 'Token missing kid header');
-      }
+      header = decodeProtectedHeader(token);
+    } catch {
+      throw new InvalidTokenError('MALFORMED');
+    }
 
-      if (!this.keyset) {
-        this.reloadKeyset();
-      }
+    if (header.alg !== ALG) throw new InvalidTokenError('BAD_ALGORITHM');
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const resolveFn = (keysetModule as any).resolveVerificationKey;
-      const matchingKey = resolveFn(this.keyset, header.kid, new Date());
-      if (!matchingKey) {
-        throw new InvalidTokenError('unknown_kid', `Unknown or expired key id: ${header.kid}`, header.kid);
-      }
+    const key = resolveVerificationKey(this.keys, header.kid);
+    if (!key) {
+      // kid nao e segredo: registrar ajuda a distinguir chave retirada cedo
+      // demais de token forjado. A resposta ao cliente permanece generica.
+      this.logger.warn({ kid: header.kid }, 'token com kid desconhecido');
+      throw new InvalidTokenError('UNKNOWN_KID', typeof header.kid === 'string' ? header.kid : undefined);
+    }
 
-      const parsedKey = await this.resolvePublicKey(matchingKey);
-
-      const { payload } = await jwtVerify(token, parsedKey, {
-        issuer: 'urn:vetra:auth',
-        audience: 'urn:vetra:api',
-        algorithms: ['EdDSA'],
+    try {
+      const { payload } = await jwtVerify(token, await this.publicKeyFor(key), {
+        algorithms: [ALG],
+        issuer: env.JWT_ISSUER,
+        audience: env.JWT_AUDIENCE,
       });
 
-      return {
-        sub: payload.sub!,
-        sid: payload.sid as string,
-        jti: payload.jti!,
-        amr: (payload.amr as string[]) ?? ['pwd'],
-        iss: payload.iss!,
-        aud: typeof payload.aud === 'string' ? payload.aud : payload.aud![0]!,
-      };
-    } catch (err: unknown) {
-      if (err instanceof InvalidTokenError) {
-        throw err;
+      const sid = payload['sid'];
+      const amr = payload['amr'];
+      if (typeof payload.sub !== 'string' || typeof sid !== 'string' || !Array.isArray(amr)) {
+        throw new InvalidTokenError('BAD_CLAIMS');
       }
-      const message = err instanceof Error ? err.message : 'Invalid token';
-      throw new InvalidTokenError('verification_failed', message);
-    }
-  }
 
-  private async resolvePrivateKey(key: JwtKey): Promise<KeyLike | Uint8Array> {
-    if (this.signingKeyCache?.key.kid === key.kid) {
-      return this.signingKeyCache.parsed;
+      return {
+        sub: payload.sub,
+        sid,
+        jti: typeof payload.jti === 'string' ? payload.jti : '',
+        amr: amr.filter((v): v is string => typeof v === 'string'),
+        iss: String(payload.iss),
+        aud: String(payload.aud),
+        iat: Number(payload.iat),
+        exp: Number(payload.exp),
+      };
+    } catch (err) {
+      if (err instanceof InvalidTokenError) throw err;
+      const code = (err as { code?: string }).code;
+      if (code === 'ERR_JWT_EXPIRED') throw new InvalidTokenError('EXPIRED');
+      if (code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') throw new InvalidTokenError('BAD_CLAIMS');
+      throw new InvalidTokenError('BAD_SIGNATURE');
     }
-    const pem = (key as unknown as { privatePem?: string; private_key_pem?: string }).privatePem ?? (key as unknown as { private_key_pem?: string }).private_key_pem;
-    if (!pem) {
-      throw new Error(`Chave privada ausente para kid=${key.kid}`);
-    }
-    const parsed = await importPKCS8(pem, 'EdDSA');
-    this.signingKeyCache = { key, parsed };
-    return parsed;
-  }
-
-  private async resolvePublicKey(key: JwtKey): Promise<KeyLike | Uint8Array> {
-    const cached = this.verificationKeyCache.get(key.kid);
-    if (cached) return cached;
-
-    const pem = (key as unknown as { publicPem?: string; public_key_pem?: string }).publicPem ?? (key as unknown as { public_key_pem?: string }).public_key_pem;
-    if (!pem) {
-      throw new Error(`Chave pública ausente para kid=${key.kid}`);
-    }
-    const parsed = await importSPKI(pem, 'EdDSA');
-    this.verificationKeyCache.set(key.kid, parsed);
-    return parsed;
   }
 }
