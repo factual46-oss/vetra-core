@@ -104,8 +104,9 @@ describe('confusao de autorizacao', () => {
     // emissor real produz. Sem `jti`, a validacao recusa com BAD_CLAIMS antes de
     // chegar na verificacao que o teste quer exercitar -- o teste passava a
     // provar a coisa errada, ou falhava sem relacao com o ataque simulado.
-    return new SignJWT({ jti: randomUUID(), ...payload })
-      .setProtectedHeader({ alg: 'EdDSA', kid })
+    return new SignJWT({ ...payload })
+      .setProtectedHeader({ alg: 'EdDSA', kid, typ: 'JWT' })
+      .setJti(randomUUID())
       .setIssuer('vetra')
       .setAudience('vetra-api')
       .setIssuedAt()
