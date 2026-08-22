@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './application/auth.service.js';
 import { RefreshService } from './application/refresh.service.js';
+import { ReauthService } from './application/reauth.service.js';
 import { AuthDatabaseService } from './infra/auth-database.service.js';
 import { AuthAuditService } from './infra/auth-audit.service.js';
 import { CredentialRepository } from './infra/credential.repository.js';
@@ -12,6 +13,7 @@ import { RefreshTokenRepository } from './infra/refresh-token.repository.js';
 import { SessionRepository } from './infra/session.repository.js';
 import { AuthGuard } from './guards/auth.guard.js';
 import { CsrfGuard } from './guards/csrf.guard.js';
+import { RecentAuthGuard } from './guards/recent-auth.guard.js';
 
 @Module({
   controllers: [AuthController],
@@ -20,6 +22,7 @@ import { CsrfGuard } from './guards/csrf.guard.js';
     AuthAuditService,
     AuthService,
     RefreshService,
+    ReauthService,
     CredentialRepository,
     JwtService,
     PasswordHasherService,
@@ -28,7 +31,8 @@ import { CsrfGuard } from './guards/csrf.guard.js';
     SessionRepository,
     AuthGuard,
     CsrfGuard,
+    RecentAuthGuard,
   ],
-  exports: [AuthGuard, SessionRepository],
+  exports: [AuthGuard, RecentAuthGuard, SessionRepository],
 })
 export class AuthModule {}
