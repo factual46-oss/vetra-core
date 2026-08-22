@@ -22,7 +22,7 @@ GRANT EXECUTE ON FUNCTION ops.touch_updated_at() TO vlos_app, vlos_auth;
 CREATE TABLE ops.privilege_allowlist (
   grantee     text NOT NULL,
   object_type text NOT NULL,   -- TABLE | SEQUENCE | FUNCTION | SCHEMA
-  object_name text NOT NULL,   -- qualificado; funcoes com assinatura canonica
+  object_name text NOT NULL,   -- qualificado; funcoes com assinatura por tipos
   privilege   text NOT NULL,
   reason      text NOT NULL,
   declared_in text NOT NULL,
@@ -56,7 +56,7 @@ RETURNS TABLE (grantee text, object_type text, object_name text, privilege text)
   routines AS (
     SELECT 'FUNCTION' AS object_type,
            format('%s.%s(%s)', n.nspname, p.proname,
-                  pg_get_function_identity_arguments(p.oid)) AS object_name,
+                  pg_catalog.oidvectortypes(p.proargtypes)) AS object_name,
            (aclexplode(coalesce(p.proacl, acldefault('f'::"char", p.proowner)))).*
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
