@@ -17,6 +17,7 @@ import { getEnv } from '../../config/env.js';
 import { DatabaseService } from '../../infra/db/database.service.js';
 import { AuthService, InvalidCredentialsError, WeakPasswordError } from './application/auth.service.js';
 import { InvalidRefreshTokenError, RefreshService } from './application/refresh.service.js';
+import { ReauthFailedError, ReauthService } from './application/reauth.service.js';
 import { InvalidEmailError } from './domain/email.js';
 import {
   ACCESS_COOKIE,
@@ -27,9 +28,11 @@ import { CSRF_COOKIE, CsrfGuard } from './guards/csrf.guard.js';
 import { ZodValidationPipe } from './dto/zod-validation.pipe.js';
 import {
   type LoginInput,
+  type ReauthInput,
   type RefreshInput,
   type RegisterInput,
   loginSchema,
+  reauthSchema,
   refreshSchema,
   registerSchema,
 } from './dto/auth.schemas.js';
@@ -42,10 +45,15 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly refresh: RefreshService,
+    private readonly reauth: ReauthService,
     private readonly sessions: SessionRepository,
     private readonly db: DatabaseService,
   ) {}
 
+  /**
+   * 202 sempre, tenha o e-mail sido cadastrado ou nao (item 9).
+   * A conclusao do fluxo depende da verificacao de e-mail (Fase 1B).
+   */
   @Post('register')
   @HttpCode(HttpStatus.ACCEPTED)
   @UsePipes(new ZodValidationPipe(registerSchema))
@@ -134,6 +142,36 @@ export class AuthController {
     };
   }
 
+  /**
+   * Confirma a senha e abre a janela de reautenticacao NA SESSAO ATUAL.
+   *
+   * Nao emite token algum e nao cria sessao: a resposta e apenas a confirmacao
+   * de que a janela abriu e por quanto tempo vale. Operacoes criticas de MFA
+   * (Bloco 5) exigirao esta janela por meio do RecentAuthGuard.
+   */
+  @Post('reauth')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AuthGuard, CsrfGuard)
+  @UsePipes(new ZodValidationPipe(reauthSchema))
+  async reauthenticate(
+    @Body() body: ReauthInput,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<{ status: string; windowSeconds: number }> {
+    const auth = req.auth!;
+    try {
+      const { windowSeconds } = await this.reauth.reauthenticate({
+        userId: auth.userId,
+        sessionId: auth.sessionId,
+        password: body.password,
+        signals: signalsOf(req),
+      });
+      return { status: 'ok', windowSeconds };
+    } catch (err) {
+      if (err instanceof ReauthFailedError) throw new UnauthorizedException();
+      throw err;
+    }
+  }
+
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(AuthGuard, CsrfGuard)
@@ -159,6 +197,10 @@ export class AuthController {
     return { revokedSessions: revoked };
   }
 
+  /**
+   * Prova a cadeia inteira: token -> AuthContext -> withUserContext -> RLS.
+   * A consulta nao filtra por id; quem filtra e a policy.
+   */
   @Get('me')
   @UseGuards(AuthGuard)
   async me(@Req() req: AuthenticatedRequest): Promise<Record<string, unknown>> {
@@ -225,6 +267,7 @@ function setAuthCookies(
     ...base,
     maxAge: env.REFRESH_TOKEN_TTL_DAYS * 86_400,
   });
+  // Legivel pelo JavaScript de proposito: e o par do double-submit.
   reply.setCookie(CSRF_COOKIE, randomBytes(24).toString('base64url'), {
     ...base,
     httpOnly: false,
