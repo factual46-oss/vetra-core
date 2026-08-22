@@ -271,3 +271,78 @@ describe('tabelas da Fase 1B: RLS e privilegio minimo', () => {
     expect(r.rows).toEqual([]);
   });
 });
+
+/**
+ * BLOCO 3.5 — vlos_app perdeu a mutacao em identity.session.
+ *
+ * A janela de reautenticacao mora numa coluna dessa tabela. Com UPDATE de
+ * tabela, a policy restringia a linha mas nao a coluna: uma injecao em qualquer
+ * modulo do produto poderia abrir a janela da propria sessao e, com um token
+ * roubado, desativar o segundo fator.
+ */
+describe('vlos_app sem mutacao em identity.session (Bloco 3.5)', () => {
+  let app: Client;
+  let auth: Client;
+  let migrator: Client;
+
+  beforeAll(async () => {
+    const urls = requireDatabase();
+    app = connect(APP_URL!);
+    auth = connect(urls.auth);
+    migrator = connect(MIGRATOR_URL!);
+    await Promise.all([app.connect(), auth.connect(), migrator.connect()]);
+  });
+
+  afterAll(async () => {
+    await Promise.all([app.end(), auth.end(), migrator.end()]);
+  });
+
+  it('vlos_app NAO tem privilegio de UPDATE em identity.session', async () => {
+    const r = await migrator.query<{ pode: boolean }>(
+      `SELECT has_table_privilege('vlos_app', 'identity.session', 'UPDATE') AS pode`,
+    );
+    expect(r.rows[0]!.pode).toBe(false);
+  });
+
+  it('vlos_app MANTEM SELECT: a verificacao de sessao por requisicao depende dela', async () => {
+    const r = await migrator.query<{ pode: boolean }>(
+      `SELECT has_table_privilege('vlos_app', 'identity.session', 'SELECT') AS pode`,
+    );
+    expect(r.rows[0]!.pode).toBe(true);
+  });
+
+  it('vlos_auth continua podendo escrever em identity.session', async () => {
+    const r = await migrator.query<{ pode: boolean }>(
+      `SELECT has_table_privilege('vlos_auth', 'identity.session', 'UPDATE') AS pode`,
+    );
+    expect(r.rows[0]!.pode).toBe(true);
+  });
+
+  it('a policy session_self_update foi removida junto com o privilegio', async () => {
+    // Deixa-la sem privilegio correspondente faria alguem ler o schema no
+    // futuro e concluir que vlos_app escreve em sessoes.
+    const r = await migrator.query(
+      `SELECT 1 FROM pg_policies WHERE schemaname = 'identity' AND tablename = 'session'
+        AND policyname = 'session_self_update'`,
+    );
+    expect(r.rowCount).toBe(0);
+  });
+
+  it('a lista branca reflete a revogacao nas duas direcoes', async () => {
+    const declarado = await migrator.query(
+      `SELECT 1 FROM ops.privilege_allowlist
+        WHERE grantee = 'vlos_app' AND object_name = 'identity.session' AND privilege = 'UPDATE'`,
+    );
+    expect(declarado.rowCount).toBe(0);
+
+    expect((await migrator.query(`SELECT * FROM ops.unexpected_privileges()`)).rows).toEqual([]);
+    expect((await migrator.query(`SELECT * FROM ops.missing_privileges()`)).rows).toEqual([]);
+  });
+
+  it('nenhuma escrita em identity.session e possivel por vlos_app', async () => {
+    const err = await expectRejection(() =>
+      app.query(`UPDATE identity.session SET reauthenticated_at = now()`),
+    );
+    expect(err.message).toMatch(/permission denied|permissão negada/i);
+  });
+});
