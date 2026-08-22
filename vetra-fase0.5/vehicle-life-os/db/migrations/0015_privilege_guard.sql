@@ -2,44 +2,12 @@
 -- 0015_privilege_guard  (Fase 1B — Bloco 1)
 --
 -- Converte a lista branca da 0010 em guarda PERMANENTE, e amplia o escopo.
---
--- PROBLEMA 1 -- a guarda da 0010 expirou sem avisar
--- Ela vivia dentro de um bloco DO: executou uma vez, no momento da migration, e
--- nunca mais. A partir do primeiro GRANT seguinte virou documentacao. Aqui ela
--- passa a ser FUNCAO, chamada pelo CI e por teste a cada execucao -- o mesmo
--- padrao que ja funciona em ops.tables_missing_rls().
---
--- PROBLEMA 2 -- a guarda so enxergava tabelas
--- information_schema.table_privileges nao cobre EXECUTE em funcao, USAGE em
--- schema nem privilegio de sequence. O estado real do projeto tem 7 grants de
--- EXECUTE, 4 de USAGE em schema e 4 em sequences. A Fase 1B cria mais dois
--- EXECUTE. A guarda anterior seria cega justamente para a categoria nova.
---
--- PROBLEMA 3 -- aclexplode(NULL) devolve zero linhas
--- Objeto que nunca recebeu GRANT nem REVOKE tem acl NULL, e o padrao do
--- PostgreSQL para FUNCOES inclui EXECUTE para PUBLIC. Uma guarda ingenua
--- enxergaria zero privilegios exatamente nas funcoes mais perigosas: as que
--- ninguem tocou. Foi literalmente o defeito da 0011 (canonical_bytes acessivel
--- via PUBLIC apesar do REVOKE nominal). Por isso todo acl passa por
--- coalesce(acl, acldefault(...)) antes de ser explodido.
---
--- PROBLEMA 4 -- lista branca que so olha para um lado
--- A verificacao e BIDIRECIONAL: falha se existir privilegio nao declarado E se
--- existir privilegio declarado que nao existe. O segundo caso pega erro de
--- digitacao na lista e revogacao feita sem atualizar a declaracao.
 -- =============================================================================
 
 SET search_path = public, extensions;
 
 -- -----------------------------------------------------------------------------
--- Higiene: as funcoes de ops nunca tiveram REVOKE FROM PUBLIC e portanto estao
--- executaveis por qualquer um. Risco baixo (leem catalogo e configuracao de
--- sessao), mas e privilegio que ninguem concedeu conscientemente.
---
--- ATENCAO as duas dependencias, motivo dos GRANT nominais logo abaixo:
---   · ops.current_user_id()  e chamada DENTRO das policies de RLS
---   · ops.touch_updated_at() e trigger disparado por vlos_auth em mfa_totp
--- Revogar de PUBLIC sem conceder nominalmente quebraria as duas.
+-- Higiene: revoga EXECUTE de PUBLIC para funções utilitárias de ops
 -- -----------------------------------------------------------------------------
 REVOKE ALL ON FUNCTION ops.touch_updated_at()   FROM PUBLIC;
 REVOKE ALL ON FUNCTION ops.current_user_id()    FROM PUBLIC;
@@ -68,23 +36,18 @@ INSERT INTO ops.rls_exemption (schema_name, table_name, reason, decided_by) VALU
    'Governanca de privilegios, sem dado de usuario. Escrita apenas por migration.', 'fase-1b');
 
 COMMENT ON TABLE ops.privilege_allowlist IS
-  'Declaracao de intencao revisada por humano. NAO e fotografia do estado: derivar automaticamente carimbaria tambem os erros existentes.';
+  'Declaracao de intencao revisada por humano. NAO e fotografia do estado.';
 
 -- -----------------------------------------------------------------------------
 -- ops.privilege_snapshot() -- estado REAL, uniforme para as quatro classes
---
--- Serve tambem de ferramenta: rodar `SELECT * FROM ops.privilege_snapshot();`
--- produz a base para revisar e declarar a lista branca linha a linha.
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION ops.privilege_snapshot()
 RETURNS TABLE (grantee text, object_type text, object_name text, privilege text) AS $fn$
   WITH relations AS (
     SELECT CASE WHEN c.relkind = 'S' THEN 'SEQUENCE' ELSE 'TABLE' END AS object_type,
            format('%s.%s', n.nspname, c.relname) AS object_name,
-           -- relkind usa 'S' maiusculo para sequence; acldefault usa 's'
-           -- minusculo. O CASE abaixo e deliberado.
            (aclexplode(coalesce(c.relacl,
-              acldefault(CASE WHEN c.relkind = 'S' THEN 's' ELSE 'r' END, c.relowner)))).*
+              acldefault(CASE WHEN c.relkind = 'S' THEN 's'::"char" ELSE 'r'::"char" END, c.relowner)))).*
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relkind IN ('r', 'p', 'v', 'm', 'S')
@@ -94,19 +57,15 @@ RETURNS TABLE (grantee text, object_type text, object_name text, privilege text)
     SELECT 'FUNCTION' AS object_type,
            format('%s.%s(%s)', n.nspname, p.proname,
                   pg_get_function_identity_arguments(p.oid)) AS object_name,
-           (aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))).*
+           (aclexplode(coalesce(p.proacl, acldefault('f'::"char", p.proowner)))).*
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
-    -- `extensions` fica FORA de proposito: pgcrypto, citext e btree_gist trazem
-    -- dezenas de funcoes com EXECUTE para PUBLIC por design do proprio pacote.
-    -- Inclui-las encheria a lista branca de ruido de terceiros e escondendo o
-    -- que importa, que sao os objetos do projeto.
     WHERE n.nspname IN ('identity', 'vehicle', 'knowledge', 'ops', 'ai', 'audit')
   ),
   schemas AS (
     SELECT 'SCHEMA' AS object_type,
            n.nspname AS object_name,
-           (aclexplode(coalesce(n.nspacl, acldefault('n', n.nspowner)))).*
+           (aclexplode(coalesce(n.nspacl, acldefault('n'::"char", n.nspowner)))).*
     FROM pg_namespace n
     WHERE n.nspname IN ('identity', 'vehicle', 'knowledge', 'ops', 'ai',
                         'audit', 'extensions', 'public')
@@ -121,8 +80,6 @@ RETURNS TABLE (grantee text, object_type text, object_name text, privilege text)
   CROSS JOIN LATERAL (
     SELECT CASE WHEN t.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(t.grantee) END AS role_name
   ) g
-  -- PUBLIC entra na vigilancia: e por onde privilegio aparece sem ninguem
-  -- ter concedido nada.
   WHERE g.role_name IN ('vlos_app', 'vlos_auth', 'PUBLIC')
   ORDER BY 1, 2, 3, 4;
 $fn$ LANGUAGE sql STABLE SET search_path = pg_catalog, public, extensions;
@@ -142,8 +99,7 @@ RETURNS TABLE (grantee text, object_type text, object_name text, privilege text)
   ORDER BY 1, 2, 3, 4;
 $fn$ LANGUAGE sql STABLE SET search_path = pg_catalog, public, extensions;
 
--- Privilegio DECLARADO que nao existe. Pega erro de digitacao na lista e
--- revogacao feita sem atualizar a declaracao.
+-- Privilegio DECLARADO que nao existe.
 CREATE OR REPLACE FUNCTION ops.missing_privileges()
 RETURNS TABLE (grantee text, object_type text, object_name text, privilege text) AS $fn$
   SELECT a.grantee, a.object_type, a.object_name, a.privilege
@@ -163,12 +119,7 @@ REVOKE ALL ON FUNCTION ops.unexpected_privileges() FROM PUBLIC;
 REVOKE ALL ON FUNCTION ops.missing_privileges()    FROM PUBLIC;
 
 -- -----------------------------------------------------------------------------
--- Declaracao do estado esperado apos 0001..0015.
---
--- Derivada da leitura das migrations, linha a linha, com motivo e origem.
--- A calibracao final vem do primeiro CI (Opcao B autorizada): se houver
--- divergencia, ops.unexpected_privileges() e ops.missing_privileges() imprimem
--- exatamente o que sobra e o que falta.
+-- Declaracao da lista branca esperada
 -- -----------------------------------------------------------------------------
 INSERT INTO ops.privilege_allowlist (grantee, object_type, object_name, privilege, reason, declared_in) VALUES
   -- ---- SCHEMA -------------------------------------------------------------
@@ -185,11 +136,11 @@ INSERT INTO ops.privilege_allowlist (grantee, object_type, object_name, privileg
   ('vlos_auth', 'SCHEMA', 'extensions', 'USAGE', 'digest e afins',                         '0008'),
 
   -- ---- TABLE / vlos_app ---------------------------------------------------
-  ('vlos_app',  'TABLE', 'identity.user',             'SELECT', 'perfil proprio sob RLS',                       '0005'),
-  ('vlos_app',  'TABLE', 'identity.user',             'UPDATE', 'perfil proprio sob RLS',                       '0005'),
-  ('vlos_app',  'TABLE', 'identity.organization',     'SELECT', 'membros sob RLS',                              '0005'),
-  ('vlos_app',  'TABLE', 'identity.organization',     'INSERT', 'bloqueado por RLS; grant mantido por contrato de teste da 0.5', '0005'),
-  ('vlos_app',  'TABLE', 'identity.organization',     'UPDATE', 'bloqueado por RLS',                            '0005'),
+  ('vlos_app',  'TABLE', 'identity.user',              'SELECT', 'perfil proprio sob RLS',                        '0005'),
+  ('vlos_app',  'TABLE', 'identity.user',              'UPDATE', 'perfil proprio sob RLS',                        '0005'),
+  ('vlos_app',  'TABLE', 'identity.organization',      'SELECT', 'membros sob RLS',                             '0005'),
+  ('vlos_app',  'TABLE', 'identity.organization',      'INSERT', 'bloqueado por RLS; grant mantido por contrato', '0005'),
+  ('vlos_app',  'TABLE', 'identity.organization',      'UPDATE', 'bloqueado por RLS',                            '0005'),
   ('vlos_app',  'TABLE', 'identity.admin_permission', 'SELECT', 'leitura das proprias permissoes',              '0005'),
   ('vlos_app',  'TABLE', 'identity.session',          'SELECT', 'verificacao de sessao por requisicao',          '0008'),
   ('vlos_app',  'TABLE', 'identity.session',          'UPDATE', 'revogacao pelo proprio usuario',               '0008'),
@@ -199,8 +150,8 @@ INSERT INTO ops.privilege_allowlist (grantee, object_type, object_name, privileg
   ('vlos_app',  'TABLE', 'ops.rls_exemption',         'SELECT', 'governanca de RLS',                            '0005'),
   ('vlos_app',  'TABLE', 'ops.rls_exemption',         'INSERT', 'governanca de RLS',                            '0005'),
   ('vlos_app',  'TABLE', 'ops.rls_exemption',         'UPDATE', 'governanca de RLS',                            '0005'),
-  ('vlos_app',  'TABLE', 'audit.log',                 'INSERT', 'append-only; SELECT revogado na 0007',          '0004'),
-  ('vlos_app',  'TABLE', 'audit.chain_anchor',        'INSERT', 'ancoragem externa; SELECT revogado na 0007',    '0006'),
+  ('vlos_app',  'TABLE', 'audit.log',                 'INSERT', 'append-only',                                  '0004'),
+  ('vlos_app',  'TABLE', 'audit.chain_anchor',        'INSERT', 'ancoragem externa',                            '0006'),
 
   -- ---- TABLE / vlos_auth --------------------------------------------------
   ('vlos_auth', 'TABLE', 'identity.session',       'SELECT', 'fluxo de autenticacao',                '0008'),
@@ -249,7 +200,7 @@ INSERT INTO ops.privilege_allowlist (grantee, object_type, object_name, privileg
                             'EXECUTE', 'consumo atomico de uso unico', '0014');
 
 -- -----------------------------------------------------------------------------
--- Verificacao final. Falha o deploy nos dois sentidos.
+-- Verificacao final
 -- -----------------------------------------------------------------------------
 DO $do$
 DECLARE
