@@ -72,6 +72,34 @@ export class SessionRepository {
     });
   }
 
+  /**
+   * A janela esta aberta para esta sessao?
+   *
+   * A comparacao de tempo acontece no PostgreSQL, e nao em JavaScript: o
+   * relogio que decide e o mesmo que gravou `reauthenticated_at`, o que elimina
+   * divergencia entre o relogio da aplicacao e o do banco.
+   *
+   * Consulta -- nunca atualiza. Renovar a janela ao usa-la a tornaria infinita
+   * para quem mantivesse a sessao ativa.
+   *
+   * Continua em `vlos_app` porque e LEITURA: a 0016 retirou de vlos_app apenas
+   * a capacidade de mutacao em identity.session. A RLS de leitura permanece.
+   */
+  async hasRecentReauth(userId: string, sessionId: string, withinSeconds: number): Promise<boolean> {
+    return this.db.withUserContext(userId, async (tx) => {
+      const result = await tx.query(
+        `SELECT 1 FROM identity.session
+          WHERE id = $1
+            AND revoked_at IS NULL
+            AND expires_at > now()
+            AND reauthenticated_at IS NOT NULL
+            AND reauthenticated_at > now() - make_interval(secs => $2)`,
+        [sessionId, withinSeconds],
+      );
+      return result.rowCount === 1;
+    });
+  }
+
   async touch(sessionId: string): Promise<void> {
     await this.authDb.query(`UPDATE identity.session SET last_used_at = now() WHERE id = $1`, [
       sessionId,
