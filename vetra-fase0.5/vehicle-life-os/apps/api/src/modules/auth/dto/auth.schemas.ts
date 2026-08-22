@@ -23,10 +23,20 @@ export const loginSchema = z
   })
   .strict();
 
+/**
+ * Apenas a senha. `.strict()` recusa qualquer campo extra -- um cliente que
+ * tente enviar `userId`, `sessionId` ou `windowSeconds` recebe 400. A sessao
+ * alvo vem SEMPRE do token verificado, nunca do corpo.
+ */
+export const reauthSchema = z
+  .object({ password: z.string().min(1).max(PASSWORD_MAX_LENGTH) })
+  .strict();
+
 export const refreshSchema = z
   .object({ refreshToken: z.string().min(1).max(512).optional() })
   .strict();
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type ReauthInput = z.infer<typeof reauthSchema>;
 export type RefreshInput = z.infer<typeof refreshSchema>;
